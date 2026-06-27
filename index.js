@@ -3,11 +3,14 @@ const readline = require('readline');
 const { loadExistingFile, saveFile, saveAsFile } = require('./editorCore');
 const editorState = require('./editorState');
 const documentModel = require('./documentModel');
+const { createLspManager, defaultLspConfigs } = require('./lspManager');
 const syntaxService = require('./syntaxService');
 
 const initialFilePaths = process.argv.slice(2).map(file => path.resolve(process.cwd(), file));
 const document = documentModel.createDocument(initialFilePaths, loadExistingFile);
 document.buffers.forEach(buffer => syntaxService.updateBuffer(buffer.id, buffer.lines, buffer.filePath, buffer.version));
+const lspManager = createLspManager({ configs: defaultLspConfigs(), onDiagnostics: () => render() });
+document.buffers.forEach(buffer => { void lspManager.openBuffer(buffer); });
 let filePath = document.buffers[0].filePath;
 let lines = document.buffers[0].lines;
 let cursorRow = document.buffers[0].cursorRow;
@@ -33,6 +36,7 @@ let treeQuery = '';
 let treeMatches = [];
 let treeSearchIndex = -1;
 let treeSearchError = null;
+let quitting = false;
 
 const useColor = !process.env.NO_COLOR;
 const color = (code, text) => useColor ? `\u001b[${code}m${text}\u001b[0m` : text;
@@ -110,8 +114,10 @@ function markBufferChanged() {
   documentModel.markChanged(activeBuffer());
   version = activeBuffer().version;
   dirty = activeBuffer().dirty;
+  syncActiveBuffer();
   clearTreeSearch();
   refreshSyntax();
+  void lspManager.changeBuffer(activeBuffer());
 }
 
 function clampCursor() {
@@ -284,6 +290,7 @@ function openBuffer(targetPath) {
   if (existingIndex === -1) {
     const buffer = documentModel.addBuffer(document, resolved, loadExistingFile(resolved));
     syntaxService.updateBuffer(buffer.id, buffer.lines, buffer.filePath, buffer.version);
+    void lspManager.openBuffer(buffer);
   } else {
     document.activeBufferIndex = existingIndex;
   }
@@ -426,7 +433,9 @@ function renderPrompt() {
   const syntax = syntaxService.getBufferState(activeBuffer().id);
   const syntaxStatus = syntax && syntax.supported && syntax.available ? `   AST ${syntax.errors.length ? style.red(`${syntax.errors.length} error${syntax.errors.length === 1 ? '' : 's'}`) : style.green('ok')}` : '';
   const treeStatus = treeMatches.length ? `   Tree ${treeSearchIndex + 1}/${treeMatches.length}` : treeSearchError ? `   ${style.red('Tree error')}` : '';
-  return `${style.mode(' EDIT ')}  Ln ${cursorRow + 1}, Col ${cursorCol + 1}   ${lines.length} lines   ${dirty ? style.yellow('modified') : style.green('saved')}${syntaxStatus}${treeStatus}`;
+  const diagnosticSummary = lspManager.diagnosticSummary(activeBuffer(), cursorRow, cursorCol);
+  const diagnosticStatus = diagnosticSummary ? `   ${style.red(diagnosticSummary)}` : '';
+  return `${style.mode(' EDIT ')}  Ln ${cursorRow + 1}, Col ${cursorCol + 1}   ${lines.length} lines   ${dirty ? style.yellow('modified') : style.green('saved')}${syntaxStatus}${treeStatus}${diagnosticStatus}`;
 }
 
 function renderHelp() {
@@ -501,6 +510,7 @@ function save(targetPath = filePath) {
   documentModel.markSaved(activeBuffer());
   dirty = activeBuffer().dirty;
   syncActiveBuffer();
+  void lspManager.saveBuffer(activeBuffer());
   return true;
 }
 
@@ -514,11 +524,21 @@ function saveAs(targetPath) {
     version = activeBuffer().version;
     refreshSyntax();
     syncActiveBuffer();
+    void lspManager.openBuffer(activeBuffer()).then(() => lspManager.saveBuffer(activeBuffer()));
   }
   return resolved;
 }
 
 function quit() {
+  if (quitting) return;
+  quitting = true;
+  Promise.race([
+    lspManager.shutdown(),
+    new Promise(resolve => setTimeout(resolve, 250)),
+  ]).finally(finishQuit);
+}
+
+function finishQuit() {
   if (process.stdin.isTTY) {
     process.stdin.setRawMode(false);
   }

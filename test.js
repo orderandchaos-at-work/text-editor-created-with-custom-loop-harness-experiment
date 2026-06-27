@@ -5,6 +5,8 @@ const EventEmitter = require('events');
 const { loadFile, saveFile, resolveSaveAsPath, saveAsFile } = require('./editorCore');
 const documentModel = require('./documentModel');
 const { createLspClient, encodeMessage, createMessageParser } = require('./lspClient');
+const { createDiagnosticStore, severityLabel } = require('./lspDiagnostics');
+const { createLspManager, defaultLspConfigs } = require('./lspManager');
 const syntaxService = require('./syntaxService');
 const {
   createEditorState,
@@ -414,6 +416,70 @@ describe('document model', () => {
   });
 });
 
+describe('lsp diagnostics', () => {
+  const firstUri = 'file:///tmp/first.js';
+  const secondUri = 'file:///tmp/second.js';
+  const errorDiagnostic = {
+    range: { start: { line: 1, character: 2 }, end: { line: 1, character: 8 } },
+    severity: 1,
+    message: 'broken',
+  };
+  const warningDiagnostic = {
+    range: { start: { line: 2, character: 0 }, end: { line: 3, character: 4 } },
+    severity: 2,
+    message: 'unused',
+  };
+
+  test('stores, replaces, and clears diagnostics per URI', () => {
+    const store = createDiagnosticStore();
+
+    store.set(firstUri, [errorDiagnostic], 1);
+    store.set(secondUri, [warningDiagnostic], 1);
+
+    expect(store.get(firstUri)).toEqual([errorDiagnostic]);
+    expect(store.get(secondUri)).toEqual([warningDiagnostic]);
+    expect(store.count(firstUri)).toBe(1);
+
+    store.set(firstUri, [warningDiagnostic], 2);
+    expect(store.get(firstUri)).toEqual([warningDiagnostic]);
+    expect(store.get(secondUri)).toEqual([warningDiagnostic]);
+
+    store.set(firstUri, [], 3);
+    expect(store.get(firstUri)).toEqual([]);
+    expect(store.count(firstUri)).toBe(0);
+
+    store.clear(secondUri);
+    expect(store.get(secondUri)).toEqual([]);
+  });
+
+  test('finds diagnostics for lines and positions', () => {
+    const store = createDiagnosticStore();
+    store.set(firstUri, [errorDiagnostic, warningDiagnostic]);
+
+    expect(store.forLine(firstUri, 1)).toEqual([errorDiagnostic]);
+    expect(store.forLine(firstUri, 3)).toEqual([warningDiagnostic]);
+    expect(store.forPosition(firstUri, 1, 4)).toEqual([errorDiagnostic]);
+    expect(store.forPosition(firstUri, 1, 1)).toEqual([]);
+    expect(store.forPosition(firstUri, 3, 2)).toEqual([warningDiagnostic]);
+  });
+
+  test('formats severity summaries and keeps buffers isolated', () => {
+    const store = createDiagnosticStore();
+    store.set(firstUri, [errorDiagnostic, warningDiagnostic]);
+    store.set(secondUri, [{ ...warningDiagnostic, message: 'second file' }]);
+
+    expect(severityLabel(1)).toBe('error');
+    expect(severityLabel(2)).toBe('warning');
+    expect(severityLabel(3)).toBe('info');
+    expect(severityLabel(4)).toBe('hint');
+    expect(severityLabel(undefined)).toBe('diagnostic');
+    expect(store.summary(firstUri, 1, 3)).toBe('LSP error: broken');
+    expect(store.summary(firstUri, 0, 0)).toBe('LSP 2 diagnostics');
+    expect(store.summary(secondUri, 2, 1)).toBe('LSP warning: second file');
+    expect(store.summary('file:///tmp/missing.js', 0, 0)).toBe('');
+  });
+});
+
 describe('lsp client', () => {
   class FakeTransport extends EventEmitter {
     constructor() {
@@ -497,6 +563,192 @@ describe('lsp client', () => {
 
     expect(client.start()).toBe(fakeProcess);
     expect(spawn).toHaveBeenCalledWith('language-server', ['--stdio'], { cwd: '/tmp/project', stdio: 'pipe' });
+  });
+
+  test('rejects pending requests when the server process emits an error', async () => {
+    const fakeProcess = Object.assign(new EventEmitter(), {
+      pid: 123,
+      stdin: { write: jest.fn(), end: jest.fn() },
+      stdout: new EventEmitter(),
+    });
+    const spawn = jest.fn(() => fakeProcess);
+    const client = createLspClient({ command: 'missing-server', spawn });
+
+    client.start();
+    const initialize = client.initialize();
+    fakeProcess.emit('error', new Error('spawn missing-server ENOENT'));
+
+    await expect(initialize).rejects.toThrow('spawn missing-server ENOENT');
+  });
+
+  test('dispatches server notifications to registered handlers', () => {
+    const transport = new FakeTransport();
+    const client = createLspClient({ transport });
+    const handler = jest.fn();
+
+    client.start();
+    client.onNotification('textDocument/publishDiagnostics', handler);
+    transport.emit('data', encodeMessage({
+      jsonrpc: '2.0',
+      method: 'textDocument/publishDiagnostics',
+      params: {
+        uri: 'file:///tmp/example.js',
+        diagnostics: [{
+          range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } },
+          severity: 1,
+          message: 'broken',
+        }],
+      },
+    }));
+
+    expect(handler).toHaveBeenCalledWith({
+      uri: 'file:///tmp/example.js',
+      diagnostics: [expect.objectContaining({ message: 'broken' })],
+    });
+  });
+});
+
+describe('lsp manager', () => {
+  function createFakeClient(handlers = {}) {
+    return {
+      start: jest.fn(),
+      initialize: jest.fn(() => Promise.resolve({ capabilities: {} })),
+      didOpen: jest.fn(),
+      didChange: jest.fn(),
+      didSave: jest.fn(),
+      shutdown: jest.fn(() => Promise.resolve()),
+      onNotification: jest.fn((method, handler) => {
+        handlers[method] = handler;
+      }),
+    };
+  }
+
+  test('reads optional JavaScript LSP config from environment variables', () => {
+    expect(defaultLspConfigs({})).toEqual({});
+    expect(defaultLspConfigs({
+      TEXT_EDITOR_JS_LSP: 'typescript-language-server',
+      TEXT_EDITOR_JS_LSP_ARGS: '--stdio --log-level 4',
+    })).toEqual({
+      javascript: {
+        command: 'typescript-language-server',
+        args: ['--stdio', '--log-level', '4'],
+      },
+    });
+  });
+
+  test('does nothing for unsupported buffers or missing config', async () => {
+    const createClient = jest.fn();
+    const manager = createLspManager({ configs: {}, createClient });
+    const buffer = documentModel.createBuffer(1, '/tmp/example.js', ['const a = 1;']);
+    const textManager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient });
+    const textBuffer = documentModel.createBuffer(2, '/tmp/example.txt', ['plain']);
+
+    await expect(manager.openBuffer(buffer)).resolves.toBe(false);
+    await expect(manager.changeBuffer(buffer)).resolves.toBe(false);
+    await expect(manager.saveBuffer(buffer)).resolves.toBe(false);
+    await expect(textManager.openBuffer(textBuffer)).resolves.toBe(false);
+    expect(createClient).not.toHaveBeenCalled();
+  });
+
+  test('starts configured JavaScript client and deduplicates didOpen', async () => {
+    const client = createFakeClient();
+    const createClient = jest.fn(() => client);
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient });
+    const buffer = documentModel.createBuffer(1, '/tmp/example.js', ['const a = 1;']);
+
+    await expect(manager.openBuffer(buffer)).resolves.toBe(true);
+    await expect(manager.openBuffer(buffer)).resolves.toBe(false);
+
+    expect(createClient).toHaveBeenCalledWith({ command: 'js-lsp' });
+    expect(client.start).toHaveBeenCalledTimes(1);
+    expect(client.initialize).toHaveBeenCalledTimes(1);
+    expect(client.didOpen).toHaveBeenCalledTimes(1);
+    expect(client.didOpen).toHaveBeenCalledWith(buffer);
+  });
+
+  test('sends didChange after buffer version is incremented and sends didSave', async () => {
+    const client = createFakeClient();
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => client });
+    const buffer = documentModel.createBuffer(1, '/tmp/example.js', ['const a = 1;']);
+
+    await manager.openBuffer(buffer);
+    buffer.lines = ['const a = 2;'];
+    documentModel.markChanged(buffer);
+    await manager.changeBuffer(buffer);
+    await manager.saveBuffer(buffer);
+
+    expect(client.didChange).toHaveBeenCalledWith(expect.objectContaining({
+      filePath: '/tmp/example.js',
+      version: 1,
+      lines: ['const a = 2;'],
+    }));
+    expect(client.didSave).toHaveBeenCalledWith(buffer);
+  });
+
+  test('save-as opens the new URI and saves it', async () => {
+    const client = createFakeClient();
+    const openedUris = [];
+    client.didOpen.mockImplementation(buffer => openedUris.push(documentModel.bufferUri(buffer)));
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => client });
+    const buffer = documentModel.createBuffer(1, '/tmp/old.js', ['const a = 1;']);
+
+    await manager.openBuffer(buffer);
+    documentModel.setBufferFilePath(buffer, '/tmp/new.js');
+    documentModel.markSaved(buffer);
+    await manager.openBuffer(buffer);
+    await manager.saveBuffer(buffer);
+
+    expect(client.didOpen).toHaveBeenCalledTimes(2);
+    expect(openedUris).toEqual(['file:///tmp/old.js', 'file:///tmp/new.js']);
+    expect(client.didSave).toHaveBeenCalledWith(expect.objectContaining({ filePath: '/tmp/new.js' }));
+  });
+
+  test('stores diagnostics by URI and keeps buffers isolated', async () => {
+    const handlers = {};
+    const client = createFakeClient(handlers);
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => client });
+    const first = documentModel.createBuffer(1, '/tmp/first.js', ['first();']);
+    const second = documentModel.createBuffer(2, '/tmp/second.js', ['second();']);
+
+    await manager.openBuffer(first);
+    await manager.openBuffer(second);
+    handlers['textDocument/publishDiagnostics']({
+      uri: 'file:///tmp/first.js',
+      diagnostics: [{
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 5 } },
+        severity: 1,
+        message: 'first broken',
+      }],
+    });
+    handlers['textDocument/publishDiagnostics']({
+      uri: 'file:///tmp/second.js',
+      diagnostics: [{
+        range: { start: { line: 0, character: 0 }, end: { line: 0, character: 6 } },
+        severity: 2,
+        message: 'second warning',
+      }],
+    });
+
+    expect(manager.diagnosticsForBuffer(first)).toEqual([expect.objectContaining({ message: 'first broken' })]);
+    expect(manager.diagnosticsForBuffer(second)).toEqual([expect.objectContaining({ message: 'second warning' })]);
+    expect(manager.diagnosticSummary(first, 0, 1)).toBe('LSP error: first broken');
+    expect(manager.diagnosticSummary(second, 0, 1)).toBe('LSP warning: second warning');
+  });
+
+  test('handles startup failure without throwing and shuts down started clients', async () => {
+    const failingClient = createFakeClient();
+    failingClient.start.mockImplementation(() => { throw new Error('missing server'); });
+    const failingManager = createLspManager({ configs: { javascript: { command: 'missing' } }, createClient: () => failingClient });
+    const buffer = documentModel.createBuffer(1, '/tmp/example.js', ['const a = 1;']);
+
+    await expect(failingManager.openBuffer(buffer)).resolves.toBe(false);
+    expect(failingManager.status.get('javascript')).toEqual({ available: false, error: 'missing server' });
+
+    const client = createFakeClient();
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => client });
+    await manager.openBuffer(buffer);
+    await expect(manager.shutdown()).resolves.toBeUndefined();
+    expect(client.shutdown).toHaveBeenCalledTimes(1);
   });
 });
 

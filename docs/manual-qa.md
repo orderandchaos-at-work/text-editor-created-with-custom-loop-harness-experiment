@@ -70,6 +70,21 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] `Esc` exits tree query mode without changing the current query results.
 - [ ] A malformed tree query or preset shows a tree error in the status row without crashing.
 
+## Optional JavaScript LSP diagnostics
+
+- [ ] Running without LSP environment variables behaves normally and shows no LSP error spam.
+- [ ] If installed, run `TEXT_EDITOR_JS_LSP=typescript-language-server TEXT_EDITOR_JS_LSP_ARGS="--stdio" npm start -- path/to/file.js`.
+- [ ] Opening a `.js`, `.jsx`, `.mjs`, or `.cjs` file starts diagnostics without blocking editor startup.
+- [ ] A JavaScript diagnostic appears in the status row after the language server responds.
+- [ ] Moving the cursor to a line with diagnostics shows the first diagnostic for that line.
+- [ ] Moving away from diagnostic lines shows the active buffer diagnostic count when diagnostics exist.
+- [ ] Editing a JavaScript buffer updates diagnostics after full-document `didChange` sync.
+- [ ] Saving a JavaScript buffer keeps the editor responsive and sends `didSave`.
+- [ ] Save-as from an unnamed or differently named buffer to a JavaScript path opens the new URI and saves it.
+- [ ] Switching buffers shows diagnostics only for the active buffer.
+- [ ] Quitting attempts LSP shutdown and restores the terminal.
+- [ ] Setting `TEXT_EDITOR_JS_LSP` to a missing command does not crash the editor.
+
 ## Rendering
 
 - [ ] Header, tabs, line numbers, status row, and help row render clearly.

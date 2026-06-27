@@ -38,9 +38,11 @@ function createLspClient(options = {}) {
   const rootUri = options.rootUri || null;
   let transport = options.transport || null;
   let process = null;
+  let transportError = null;
   let nextId = 1;
   const pending = new Map();
   const received = [];
+  const notificationHandlers = new Map();
   const parseMessage = createMessageParser(message => {
     received.push(message);
     if (message.id !== undefined && pending.has(message.id)) {
@@ -48,6 +50,9 @@ function createLspClient(options = {}) {
       pending.delete(message.id);
       if (message.error) reject(message.error);
       else resolve(message.result);
+    } else if (message.method && message.id === undefined) {
+      const handler = notificationHandlers.get(message.method);
+      if (handler) handler(message.params || {});
     }
   });
 
@@ -58,10 +63,18 @@ function createLspClient(options = {}) {
     } else if (transport.on) {
       transport.on('data', parseMessage);
     }
+    if (transport.on) transport.on('error', handleTransportError);
+  }
+
+  function handleTransportError(error) {
+    transportError = error;
+    for (const { reject } of pending.values()) reject(error);
+    pending.clear();
   }
 
   function write(payload) {
     if (!transport) throw new Error('LSP client has not been started');
+    if (transportError) throw transportError;
     const message = encodeMessage(payload);
     if (transport.stdin && transport.stdin.write) transport.stdin.write(message);
     else transport.write(message);
@@ -89,6 +102,10 @@ function createLspClient(options = {}) {
 
   function notify(method, params = {}) {
     write({ jsonrpc: '2.0', method, params });
+  }
+
+  function onNotification(method, handler) {
+    notificationHandlers.set(method, handler);
   }
 
   function initialize(params = {}) {
@@ -150,6 +167,7 @@ function createLspClient(options = {}) {
     shutdown,
     request,
     notify,
+    onNotification,
     received,
   };
 }

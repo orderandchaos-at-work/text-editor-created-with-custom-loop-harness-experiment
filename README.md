@@ -37,6 +37,8 @@ npm test
 
 Automated tests cover file helper behavior, pure editor state helpers, and the Tree-sitter syntax service, including AST parsing, syntax highlighting, tree search, and syntax cache behavior. Interactive terminal behavior is covered by the manual QA checklist in `docs/manual-qa.md`.
 
+LSP tests use fake transports and fake clients. They do not require a real JavaScript language server.
+
 ## Controls
 
 | Key | Action |
@@ -90,6 +92,26 @@ Example tree query:
 ```scheme
 (function_declaration name: (identifier) @function.name)
 ```
+
+## Optional JavaScript LSP diagnostics
+
+JavaScript LSP diagnostics are optional. Without LSP environment variables, the editor starts and behaves normally.
+
+To enable JavaScript diagnostics, point the editor at an external language server command:
+
+```bash
+TEXT_EDITOR_JS_LSP=typescript-language-server TEXT_EDITOR_JS_LSP_ARGS="--stdio" npm start -- src/example.js
+```
+
+The editor sends full-document LSP sync events for JavaScript-like files (`.js`, `.jsx`, `.mjs`, `.cjs`):
+
+- opening a JavaScript buffer sends `textDocument/didOpen`
+- editing sends full-document `textDocument/didChange` after the buffer version increments
+- saving sends `textDocument/didSave`
+- save-as opens the new URI and sends `didSave`
+- `textDocument/publishDiagnostics` notifications are stored per buffer URI
+
+Diagnostics for the active buffer appear in the status row. When the cursor is on a line with diagnostics, the first diagnostic for that line is shown; otherwise the status row shows the active buffer diagnostic count.
 
 ## Save behavior
 
