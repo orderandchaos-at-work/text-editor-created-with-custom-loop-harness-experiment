@@ -7,6 +7,10 @@
     "start": "node index.js",
     "test": "jest --runInBand"
   },
+  "dependencies": {
+    "tree-sitter": "^0.25.0",
+    "tree-sitter-javascript": "^0.25.0"
+  },
   "devDependencies": {
     "jest": "^30.0.0"
   },

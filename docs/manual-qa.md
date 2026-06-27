@@ -44,8 +44,22 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] `Ctrl+Shift+G` jumps to the previous match.
 - [ ] `Esc` exits search mode.
 - [ ] `Ctrl+R` opens replace mode.
-- [ ] Replace current updates only the current match.
-- [ ] Replace all updates every matching substring.
+- [ ] Pressing `Enter` after the replace query advances to replacement text entry.
+- [ ] Pressing `Enter` after replacement text updates only the current match.
+- [ ] Pressing `Ctrl+R` after replacement text updates every matching substring.
+
+## Tree-sitter JavaScript support
+
+- [ ] `npm install` has installed `tree-sitter` and `tree-sitter-javascript` before Tree-sitter QA starts.
+- [ ] Opening a `.js` file shows syntax highlighting when color is enabled.
+- [ ] A valid `.js` file shows `AST ok` in the status row.
+- [ ] A `.js` file with invalid syntax shows an AST syntax error count in the status row.
+- [ ] `Ctrl+T` opens the tree query prompt.
+- [ ] Entering `(function_declaration name: (identifier) @function.name)` highlights matching JavaScript function names.
+- [ ] `Ctrl+G` jumps to the next tree query match.
+- [ ] `Ctrl+Shift+G` jumps to the previous tree query match.
+- [ ] `Esc` exits tree query mode without changing the current query results.
+- [ ] A malformed tree query shows a tree error in the status row without crashing.
 
 ## Rendering
 
