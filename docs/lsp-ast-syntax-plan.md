@@ -2,27 +2,30 @@
 
 ## Current editor constraints
 
-The editor is a CommonJS Node.js terminal app. `index.js` owns terminal input, rendering, buffers, search/replace prompts, and LSP/AST integration points would currently live there unless more state is extracted first. Text is stored as `lines: string[]`, which maps well to Tree-sitter's callback parser and LSP's line/character positions.
+The editor is a CommonJS Node.js terminal app. `index.js` still owns terminal input, rendering, buffers, prompts, and the current integration points, but pure editing/search behavior has started moving into helper modules. Text is stored as `lines: string[]`, which maps well to Tree-sitter parsing and LSP line/character positions.
 
-Before adding large features, finish extracting pure state helpers for search, replace, buffer state, and edits so parsing and language services can subscribe to a small set of document-change events instead of terminal key handling.
+Before adding LSP or incremental parsing, extract a small document model so parsing and language services can subscribe to normalized document-change events instead of terminal key handling.
 
 ## Current implementation status
 
-Tree-sitter-first implementation is partially in place.
+Tree-sitter-first JavaScript support is implemented and verified.
 
 Implemented:
 
-- `tree-sitter` and `tree-sitter-javascript` are declared in `package.json` and `package-lock.json`.
-- `syntaxService.js` detects JavaScript-like files, converts editor lines to parser text, parses JavaScript buffers, collects syntax errors, builds highlight spans, and runs raw Tree-sitter query searches.
-- `index.js` renders Tree-sitter highlight spans, shows `AST ok` or an AST error count in the status row, and exposes raw tree query search with `Ctrl+T`.
+- `tree-sitter` and `tree-sitter-javascript` are declared in `package.json` and installed in the workspace.
+- `syntaxService.js` detects JavaScript-like files, converts editor lines to parser text, parses JavaScript buffers, collects syntax errors, builds highlight spans, and runs Tree-sitter query searches.
+- `syntaxService.js` maintains cached per-buffer syntax state containing language, parser, tree, version, errors, highlights, and query matches.
+- Supported buffers are parsed when opened/created and reparsed after edits using full-buffer reparse.
+- `index.js` renders cached Tree-sitter highlight spans, shows `AST ok` or an AST error count in the status row, and exposes tree query search with `Ctrl+T`.
+- Rendering consumes cached syntax state instead of parsing during render.
 - Tree query matches can be navigated with `Ctrl+G` and `Ctrl+Shift+G`.
-- Jest tests cover language detection and line-to-text conversion; runtime Tree-sitter parse/highlight/query tests are present.
+- `Ctrl+T` accepts raw Tree-sitter queries and friendly presets such as `functions`, `classes`, `imports`, `calls`, `calls:<name>`, `variables`, and `syntax-errors`.
+- JavaScript syntax highlighting covers representative imports/exports, declarations, calls, classes, properties, strings, template strings, regex literals, numbers, comments, constants, builtin variables, and safe operators.
+- Jest tests cover language detection, line-to-text conversion, parsing, syntax errors, highlight captures, cached syntax state, raw queries, AST presets, and extracted search/replace helpers.
 
-Verification gap:
+Verification:
 
-- In the current workspace, `node_modules` does not contain the Tree-sitter packages, so runtime Tree-sitter tests are skipped by `syntaxService.isTreeSitterAvailable()`.
-- `npm test` currently passes with 13 tests run and 2 Tree-sitter runtime tests skipped.
-- The next verification step is to run `npm install`, confirm the Tree-sitter packages are present, then rerun `npm test` and ensure the skipped runtime tests execute.
+- `npm test` passes with 30 tests and no skipped Tree-sitter runtime tests.
 
 ## Recommended architecture
 
@@ -34,9 +37,10 @@ Add three separate layers:
    - Provides helpers for full text, offset-to-position, and position-to-offset.
 
 2. `syntaxService.js`
-   - Uses Tree-sitter for incremental parsing.
-   - Maintains one parser/tree per supported language buffer.
+   - Uses Tree-sitter for parsing.
+   - Maintains parser/tree state per supported buffer.
    - Provides highlight spans, syntax errors, symbols, and structural query results.
+   - Currently uses full-buffer reparse; later it can use incremental edits once document edit events exist.
 
 3. `lspClient.js`
    - Starts language server processes per language.
@@ -49,36 +53,52 @@ Rendering should consume decorations from the syntax and LSP layers rather than 
 
 Use Tree-sitter first. It is a good fit because it is designed as an incremental parsing library, can build concrete syntax trees, and can update syntax trees efficiently as source changes. The Node binding supports parsing either a string or a custom callback, which fits the editor's `lines` array.
 
-Suggested initial dependencies:
+Current dependencies:
 
 - `tree-sitter`
 - `tree-sitter-javascript`
 
-Start with JavaScript because this project is JavaScript and the grammar is available on npm.
-
-Implementation outline:
+Current JavaScript path:
 
 1. Detect language from file extension, initially `.js`, `.jsx`, `.mjs`, `.cjs`.
 2. Create a Tree-sitter parser for JavaScript.
-3. Parse buffer text on open.
-4. On edits, call `tree.edit(...)` with byte offsets and row/column points, then reparse with `parser.parse(newText, oldTree)`.
-5. Run highlight queries to produce ranges with capture names like `keyword`, `function`, `type`, `property`, `string`, `number`, and `comment`.
-6. Map capture names to existing ANSI styles and apply highlighting during line rendering.
+3. Parse supported buffers on open/create.
+4. Reparse supported buffers after edits using full-buffer reparse.
+5. Run highlight queries to produce ranges with capture names like `keyword`, `function`, `method`, `class`, `property`, `string`, `number`, `comment`, `constant`, `builtin`, and `operator`.
+6. Map capture names to ANSI styles and apply highlighting during line rendering.
 
-The first version can reparse the full buffer after each edit if that is simpler. Keep the API shaped for incremental edits so it can be optimized without changing rendering later.
+Later optimization:
+
+- Add normalized edit events through the document model.
+- Call `tree.edit(...)` with byte offsets and row/column points.
+- Reparse with `parser.parse(newText, oldTree)`.
+
+Do not do incremental parsing before the document model exists.
 
 ## Tree search
 
 Use Tree-sitter queries for structural search. Tree-sitter queries use S-expression patterns that match syntax nodes and can capture nodes with names such as `@function` or `@call`.
 
-Initial UX options:
+Implemented UX:
 
-- Add an AST search prompt separate from text search, for example `Ctrl+T`.
-- Accept raw Tree-sitter query syntax at first.
-- Show match count and jump next/previous through captured node start positions.
-- Highlight the current structural match in the buffer.
+- `Ctrl+T` opens tree search.
+- Raw Tree-sitter query syntax is supported.
+- Friendly presets are supported for common searches.
+- Match count and current match status appear in the status row.
+- `Ctrl+G` and `Ctrl+Shift+G` jump next/previous through tree matches.
+- Current structural matches are highlighted in the buffer.
 
-Example JavaScript queries:
+Implemented presets:
+
+- `functions`
+- `classes`
+- `imports`
+- `calls`
+- `calls:<name>`
+- `variables`
+- `syntax-errors`
+
+Example raw JavaScript queries:
 
 ```scheme
 (function_declaration name: (identifier) @function.name)
@@ -87,19 +107,18 @@ Example JavaScript queries:
 (ERROR) @syntax.error
 ```
 
-Later, add friendlier presets:
+Potential later presets:
 
-- `functions`
-- `classes`
-- `calls:<name>`
-- `imports`
+- `methods`
+- `exports`
+- `constructors`
 - `todos` from comments
 
 ## LSP
 
 Use LSP after the document model exists. LSP gives editor features that Tree-sitter does not provide by itself: diagnostics, hover, completion, go-to-definition, references, rename, code actions, and formatting.
 
-Suggested dependencies:
+Suggested dependencies to verify before use:
 
 - `vscode-jsonrpc` for the JSON-RPC transport over a spawned language-server process.
 - `vscode-languageserver-protocol` for request/notification/type names.
@@ -124,26 +143,38 @@ Tree-sitter comes before LSP. Build local AST parsing, syntax highlighting, synt
 
 ## Feature order
 
-1. Finish editor state/document model extraction.
-2. Add language detection and full-text/position helpers.
-3. Add Tree-sitter JavaScript parsing with syntax-error detection.
-4. Add syntax highlighting from Tree-sitter query captures.
+Completed:
+
+1. Add language detection and full-text helpers.
+2. Add Tree-sitter JavaScript parsing with syntax-error detection.
+3. Add syntax highlighting from Tree-sitter query captures.
+4. Add per-buffer syntax state caching.
 5. Add AST/tree search with raw query input.
-6. Add LSP process management and full-document sync.
-7. Render LSP diagnostics.
-8. Add hover, completion, go-to-definition, references, rename, and formatting.
-9. Optimize Tree-sitter incremental edit ranges and LSP incremental sync.
-10. Add more grammars and configurable language-server commands.
+6. Add friendly AST search presets.
+7. Expand representative JavaScript highlighting.
+
+Next:
+
+1. Add automated coverage for buffer switching, dirty-state preservation, and multi-buffer syntax cache behavior.
+2. Extract `documentModel.js` for buffers, versions, dirty state, full text, position/offset helpers, and edit application.
+3. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
+4. Add LSP process management and full-document sync.
+5. Render LSP diagnostics.
+6. Add hover, completion, go-to-definition, references, rename, and formatting.
+7. Add more grammars and configurable language-server commands.
 
 ## Testing strategy
 
-Add automated tests before wiring everything into terminal input:
+Automated tests currently cover the Tree-sitter baseline and extracted search/replace helpers.
 
-- language detection by filename
+Next automated tests:
+
+- buffer switching and cursor preservation
+- dirty-state preservation and save behavior
+- syntax state staying associated with the correct buffer
+- search/tree matches not bleeding between buffers
 - offset/position conversion across multiple lines
 - normalized edit event generation
-- Tree-sitter parse/highlight spans for a small JavaScript fixture
-- structural query matches for functions/calls/imports
 - LSP JSON-RPC message wrapper with a fake child process or fake connection
 
 Keep manual QA for terminal rendering, keybindings, and interactive language-server behavior.
@@ -151,7 +182,6 @@ Keep manual QA for terminal rendering, keybindings, and interactive language-ser
 ## Open decisions
 
 - Whether to keep using CommonJS or migrate to ESM before adding modern parser/LSP packages.
-- Whether to vendor highlight queries or read them from installed grammar packages.
-- Whether to support raw Tree-sitter queries only, friendly presets only, or both.
+- Whether to vendor highlight queries or keep local minimal queries.
 - Which JavaScript language server command to recommend as the default.
 - How diagnostics and highlights should interact when ranges overlap.

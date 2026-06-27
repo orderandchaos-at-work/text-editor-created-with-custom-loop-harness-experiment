@@ -3,30 +3,141 @@ const path = require('path');
 const javascriptExtensions = new Set(['.js', '.jsx', '.mjs', '.cjs']);
 
 const highlightQuery = `
+(identifier) @variable
+(property_identifier) @property
+(function_declaration name: (identifier) @function)
+(function_expression name: (identifier) @function)
+(method_definition name: (property_identifier) @function.method)
+(variable_declarator name: (identifier) @function value: [(arrow_function) (function_expression)])
+(lexical_declaration kind: "const" (variable_declarator name: (identifier) @constant))
+(call_expression function: (identifier) @function.call)
+(call_expression function: (member_expression property: (property_identifier) @function.method))
+(class_declaration name: (identifier) @constructor)
+(class name: (identifier) @constructor)
+(this) @variable.builtin
+(super) @variable.builtin
 [
-  "function"
-  "return"
-  "const"
-  "let"
-  "var"
-  "class"
-  "import"
-  "export"
-  "from"
-  "if"
-  "else"
-  "for"
-  "while"
-] @keyword
+  (true)
+  (false)
+  (null)
+  (undefined)
+] @constant.builtin
 (comment) @comment
 (string) @string
 (template_string) @string
+(regex) @string.special
 (number) @number
-(function_declaration name: (identifier) @function)
-(call_expression function: (identifier) @function)
-(pair key: (property_identifier) @property)
+[
+  "as"
+  "async"
+  "await"
+  "break"
+  "case"
+  "catch"
+  "class"
+  "const"
+  "continue"
+  "debugger"
+  "default"
+  "delete"
+  "do"
+  "else"
+  "export"
+  "extends"
+  "finally"
+  "for"
+  "from"
+  "function"
+  "get"
+  "if"
+  "import"
+  "in"
+  "instanceof"
+  "let"
+  "new"
+  "of"
+  "return"
+  "set"
+  "static"
+  "switch"
+  "target"
+  "throw"
+  "try"
+  "typeof"
+  "var"
+  "void"
+  "while"
+  "with"
+  "yield"
+] @keyword
+[
+  "-"
+  "--"
+  "-="
+  "+"
+  "++"
+  "+="
+  "*"
+  "*="
+  "**"
+  "**="
+  "/"
+  "/="
+  "%"
+  "%="
+  "<"
+  "<="
+  "<<"
+  "<<="
+  "="
+  "=="
+  "==="
+  "!"
+  "!="
+  "!=="
+  "=>"
+  ">"
+  ">="
+  ">>"
+  ">>="
+  ">>>"
+  ">>>="
+  "~"
+  "^"
+  "&"
+  "|"
+  "^="
+  "&="
+  "|="
+  "&&"
+  "||"
+  "??"
+  "&&="
+  "||="
+  "??="
+  (optional_chain)
+] @operator
 (ERROR) @error
 `;
+
+const astSearchPresets = {
+  functions: `[
+    (function_declaration name: (identifier) @function.name)
+    (method_definition name: (property_identifier) @function.name)
+    (variable_declarator name: (identifier) @function.name value: [(arrow_function) (function_expression)])
+  ]`,
+  classes: `[
+    (class_declaration name: (identifier) @class.name)
+    (class name: (identifier) @class.name)
+  ]`,
+  imports: `(import_statement) @import`,
+  calls: `[
+    (call_expression function: (identifier) @call.name)
+    (call_expression function: (member_expression property: (property_identifier) @call.name))
+  ]`,
+  variables: `(variable_declarator name: (identifier) @variable.name)`,
+  'syntax-errors': `(ERROR) @syntax.error`,
+};
 
 let treeSitter;
 let javascriptLanguage;
@@ -100,14 +211,43 @@ function queryCaptures(language, tree, querySource) {
   return query.captures(tree.rootNode).map(capture => nodeToRange(capture.node, capture.name));
 }
 
-function highlight(lines, filePath) {
-  const parsed = parse(lines, filePath);
-  if (!parsed.tree) return [];
+function collectHighlights(language, tree, querySource = highlightQuery) {
   try {
-    return queryCaptures(parsed.language, parsed.tree, highlightQuery);
+    return queryCaptures(language, tree, querySource);
   } catch (_) {
     return [];
   }
+}
+
+function resolveAstSearchInput(input) {
+  const trimmed = input.trim();
+  if (astSearchPresets[trimmed]) {
+    return { querySource: astSearchPresets[trimmed], preset: trimmed, error: null };
+  }
+  if (trimmed.startsWith('calls:')) {
+    const name = trimmed.slice('calls:'.length).trim();
+    if (!name) {
+      return { querySource: null, preset: 'calls', error: 'Invalid AST preset: calls:<name> requires a name' };
+    }
+    return {
+      querySource: astSearchPresets.calls,
+      preset: 'calls',
+      filter: { capture: 'call.name', text: name },
+      error: null,
+    };
+  }
+  return { querySource: input, preset: null, error: null };
+}
+
+function filterResolvedMatches(matches, resolved) {
+  if (!resolved.filter) return matches;
+  return matches.filter(match => match.capture === resolved.filter.capture && match.text === resolved.filter.text);
+}
+
+function highlight(lines, filePath) {
+  const parsed = parse(lines, filePath);
+  if (!parsed.tree) return [];
+  return collectHighlights(parsed.language, parsed.tree);
 }
 
 function parse(lines, filePath) {
@@ -126,7 +266,7 @@ function parse(lines, filePath) {
       language: result.language,
       version: 0,
       errors: collectSyntaxErrors(result.tree),
-      highlights: queryCaptures(result.language, result.tree, highlightQuery),
+      highlights: collectHighlights(result.language, result.tree),
       queryMatches: [],
     };
   } catch (error) {
@@ -180,7 +320,7 @@ function updateBuffer(bufferId, lines, filePath, version) {
       tree: result.tree,
       version,
       errors: collectSyntaxErrors(result.tree),
-      highlights: queryCaptures(result.language, result.tree, highlightQuery),
+      highlights: collectHighlights(result.language, result.tree),
       queryMatches: [],
     };
     bufferStates.set(bufferId, state);
@@ -207,9 +347,14 @@ function treeSearchBuffer(bufferId, querySource) {
   if (!state || !state.available || !querySource) {
     return { matches: [], error: null };
   }
+  const resolved = resolveAstSearchInput(querySource);
+  if (resolved.error) {
+    state.queryMatches = [];
+    return { matches: [], error: resolved.error };
+  }
   try {
-    state.queryMatches = queryCaptures(state.language, state.tree, querySource);
-    return { matches: state.queryMatches, error: null };
+    state.queryMatches = filterResolvedMatches(queryCaptures(state.language, state.tree, resolved.querySource), resolved);
+    return { matches: state.queryMatches, error: null, preset: resolved.preset };
   } catch (error) {
     state.queryMatches = [];
     return { matches: [], error: error.message };
@@ -221,9 +366,13 @@ function treeSearch(lines, filePath, querySource) {
   if (!languageName || !querySource) {
     return { matches: [], error: null };
   }
+  const resolved = resolveAstSearchInput(querySource);
+  if (resolved.error) {
+    return { matches: [], error: resolved.error };
+  }
   try {
     const result = parseJavaScript(lines);
-    return { matches: queryCaptures(result.language, result.tree, querySource), error: null };
+    return { matches: filterResolvedMatches(queryCaptures(result.language, result.tree, resolved.querySource), resolved), error: null, preset: resolved.preset };
   } catch (error) {
     return { matches: [], error: error.message };
   }
@@ -240,4 +389,6 @@ module.exports = {
   getBufferState,
   clearBuffer,
   treeSearchBuffer,
+  resolveAstSearchInput,
+  collectHighlights,
 };

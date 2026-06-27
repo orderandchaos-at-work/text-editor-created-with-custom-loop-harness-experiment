@@ -317,28 +317,65 @@ function styleCapture(capture, text) {
   if (capture === 'comment') return style.dim(text);
   if (capture === 'keyword') return style.magenta(text);
   if (capture === 'string') return style.green(text);
+  if (capture === 'string.special') return style.green(text);
   if (capture === 'number') return style.yellow(text);
   if (capture === 'function') return style.cyan(text);
+  if (capture === 'function.call') return style.cyan(text);
+  if (capture === 'function.method') return style.cyan(text);
   if (capture === 'property') return style.yellow(text);
+  if (capture === 'constructor') return style.cyan(text);
+  if (capture === 'constant') return style.yellow(text);
+  if (capture === 'constant.builtin') return style.yellow(text);
+  if (capture === 'variable.builtin') return style.magenta(text);
+  if (capture === 'operator') return style.magenta(text);
   if (capture === 'error' || capture === 'syntax.error') return style.red(text);
+  if (capture === 'search.current') return style.mode(text);
+  if (capture === 'search.match') return style.yellow(text);
   if (capture === 'tree.current') return style.mode(text);
   if (capture === 'tree.match') return style.cyan(text);
   return text;
 }
 
+function decorationPriority(capture) {
+  if (capture === 'tree.current') return 5;
+  if (capture === 'search.current') return 4;
+  if (capture === 'tree.match') return 3;
+  if (capture === 'search.match') return 2;
+  return 1;
+}
+
+function decorationsOverlap(left, right) {
+  return left.row === right.row && left.endRow === right.endRow && left.col < right.endCol && right.col < left.endCol;
+}
+
 function lineDecorations(row, highlights) {
-  const decorations = highlights.filter(span => span.row === row && span.endRow === row && span.endCol > span.col);
+  const priorityDecorations = [];
+  if (searchQuery) {
+    for (let index = 0; index < searchMatches.length; index++) {
+      const match = searchMatches[index];
+      if (match.row === row) {
+        priorityDecorations.push({
+          ...match,
+          endRow: match.row,
+          endCol: match.col + searchQuery.length,
+          capture: index === searchIndex ? 'search.current' : 'search.match'
+        });
+      }
+    }
+  }
   for (const match of treeMatches) {
     if (match.row === row && match.endRow === row && match.endCol > match.col) {
-      decorations.push({ ...match, capture: 'tree.match' });
+      priorityDecorations.push({ ...match, capture: 'tree.match' });
     }
   }
   const currentTreeMatch = treeMatches[treeSearchIndex];
   if (currentTreeMatch && currentTreeMatch.row === row && currentTreeMatch.endRow === row && currentTreeMatch.endCol > currentTreeMatch.col) {
-    decorations.push({ ...currentTreeMatch, capture: 'tree.current' });
+    priorityDecorations.push({ ...currentTreeMatch, capture: 'tree.current' });
   }
+  const decorations = highlights.filter(span => span.row === row && span.endRow === row && span.endCol > span.col && !priorityDecorations.some(priority => decorationsOverlap(span, priority))).concat(priorityDecorations);
   return decorations.sort((left, right) => {
     if (left.col !== right.col) return left.col - right.col;
+    if (decorationPriority(left.capture) !== decorationPriority(right.capture)) return decorationPriority(right.capture) - decorationPriority(left.capture);
     return right.endCol - left.endCol;
   });
 }
@@ -397,7 +434,7 @@ function renderPrompt() {
   if (saveAsMode) return `${style.yellow('Save as:')} ${saveAsPath}`;
   if (replaceMode) return replaceStage === 'query' ? `${style.yellow('Replace find:')} ${replaceQuery}` : `${style.yellow('Replace with:')} ${replaceText}`;
   if (searchMode) return `${style.yellow('Search:')} ${searchQuery || ''}`;
-  if (treeSearchMode) return `${style.yellow('Tree query:')} ${treeQuery || ''}`;
+  if (treeSearchMode) return `${style.yellow('Tree query/preset:')} ${treeQuery || ''}`;
   if (quitConfirm) return style.red('Unsaved changes! Press Ctrl+Q again to quit');
   const syntax = syntaxService.getBufferState(activeBuffer().id);
   const syntaxStatus = syntax && syntax.supported && syntax.available ? `   AST ${syntax.errors.length ? style.red(`${syntax.errors.length} error${syntax.errors.length === 1 ? '' : 's'}`) : style.green('ok')}` : '';
@@ -410,7 +447,7 @@ function renderHelp() {
   if (saveAsMode) return `${style.bold('Enter')} ${style.dim('save')}  ${style.bold('Esc')} ${style.dim('cancel')}`;
   if (replaceMode) return `${style.bold('Enter')} ${style.dim('accept')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+R')} ${style.dim('replace all')}  ${style.bold('Ctrl+F')} ${style.dim('search')}`;
   if (searchMode) return `${style.bold('Enter')} ${style.dim('search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+F')} ${style.dim('search')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
-  if (treeSearchMode) return `${style.bold('Enter')} ${style.dim('tree search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
+  if (treeSearchMode) return `${style.bold('Enter')} ${style.dim('tree search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Presets')} ${style.dim('functions/calls/classes')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
   return `${style.bold('Ctrl+S')} ${style.dim('Save')}  ${style.bold('Ctrl+O')} ${style.dim('Open')}  ${style.bold('Ctrl+N/P')} ${style.dim('Next/Prev')}  ${style.bold('Ctrl+Q')} ${style.dim('Quit')}  ${style.bold('Ctrl+F')} ${style.dim('Search')}  ${style.bold('Ctrl+R')} ${style.dim('Replace')}  ${style.bold('Ctrl+T')} ${style.dim('Tree')}`;
 }
 
@@ -464,7 +501,7 @@ function render() {
     targetCol = 'Search: '.length + searchQuery.length + 1;
   } else if (treeSearchMode) {
     targetRow = promptRow;
-    targetCol = 'Tree query: '.length + treeQuery.length + 1;
+    targetCol = 'Tree query/preset: '.length + treeQuery.length + 1;
   }
   process.stdout.write(`\u001b[${targetRow};${targetCol}H\u001b[?25h`);
 }
