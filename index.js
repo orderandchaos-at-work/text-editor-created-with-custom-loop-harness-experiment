@@ -2,19 +2,19 @@ const path = require('path');
 const readline = require('readline');
 const { loadExistingFile, saveFile, saveAsFile } = require('./editorCore');
 const editorState = require('./editorState');
+const documentModel = require('./documentModel');
 const syntaxService = require('./syntaxService');
 
 const initialFilePaths = process.argv.slice(2).map(file => path.resolve(process.cwd(), file));
-let nextBufferId = 1;
-let buffers = initialFilePaths.length ? initialFilePaths.map(createBuffer) : [createBuffer(null)];
-let activeBufferIndex = 0;
-let filePath = buffers[0].filePath;
-let lines = buffers[0].lines;
-let cursorRow = buffers[0].cursorRow;
-let cursorCol = buffers[0].cursorCol;
-let viewportRow = buffers[0].viewportRow;
-let dirty = buffers[0].dirty;
-let version = buffers[0].version;
+const document = documentModel.createDocument(initialFilePaths, loadExistingFile);
+document.buffers.forEach(buffer => syntaxService.updateBuffer(buffer.id, buffer.lines, buffer.filePath, buffer.version));
+let filePath = document.buffers[0].filePath;
+let lines = document.buffers[0].lines;
+let cursorRow = document.buffers[0].cursorRow;
+let cursorCol = document.buffers[0].cursorCol;
+let viewportRow = document.buffers[0].viewportRow;
+let dirty = document.buffers[0].dirty;
+let version = document.buffers[0].version;
 let quitConfirm = false;
 let searchQuery = '';
 let searchMatches = [];
@@ -47,23 +47,8 @@ const style = {
   mode: text => color('30;46', text)
 };
 
-function createBuffer(filePath) {
-  const buffer = {
-    id: nextBufferId++,
-    filePath,
-    lines: loadExistingFile(filePath),
-    cursorRow: 0,
-    cursorCol: 0,
-    viewportRow: 0,
-    dirty: false,
-    version: 0
-  };
-  syntaxService.updateBuffer(buffer.id, buffer.lines, buffer.filePath, buffer.version);
-  return buffer;
-}
-
 function activeBuffer() {
-  return buffers[activeBufferIndex];
+  return documentModel.activeBuffer(document);
 }
 
 function syncActiveBuffer() {
@@ -122,7 +107,9 @@ function refreshSyntax() {
 }
 
 function markBufferChanged() {
-  version++;
+  documentModel.markChanged(activeBuffer());
+  version = activeBuffer().version;
+  dirty = activeBuffer().dirty;
   clearTreeSearch();
   refreshSyntax();
 }
@@ -283,9 +270,9 @@ function promptOpen() {
 }
 
 function switchBuffer(delta) {
-  if (buffers.length < 2) return;
+  if (document.buffers.length < 2) return;
   syncActiveBuffer();
-  activeBufferIndex = (activeBufferIndex + delta + buffers.length) % buffers.length;
+  documentModel.switchBuffer(document, delta);
   loadActiveBuffer();
 }
 
@@ -293,12 +280,12 @@ function openBuffer(targetPath) {
   if (!targetPath) return false;
   const resolved = path.resolve(process.cwd(), targetPath);
   syncActiveBuffer();
-  const existingIndex = buffers.findIndex(buffer => buffer.filePath === resolved);
+  const existingIndex = documentModel.findBufferIndex(document, resolved);
   if (existingIndex === -1) {
-    buffers.push(createBuffer(resolved));
-    activeBufferIndex = buffers.length - 1;
+    const buffer = documentModel.addBuffer(document, resolved, loadExistingFile(resolved));
+    syntaxService.updateBuffer(buffer.id, buffer.lines, buffer.filePath, buffer.version);
   } else {
-    activeBufferIndex = existingIndex;
+    document.activeBufferIndex = existingIndex;
   }
   loadActiveBuffer();
   return true;
@@ -404,7 +391,7 @@ function renderHeader(cols, status) {
   const appName = ' text-editor ';
   const dirtyPlain = dirty ? ' ● modified' : '';
   const dirtyText = dirty ? ` ${style.yellow('● modified')}` : '';
-  const bufferPlain = ` ${activeBufferIndex + 1}/${buffers.length}`;
+  const bufferPlain = ` ${document.activeBufferIndex + 1}/${document.buffers.length}`;
   const bufferText = style.dim(bufferPlain);
   const fileNameWidth = Math.max(5, cols - appName.length - dirtyPlain.length - bufferPlain.length - 2);
   const fileName = style.bold(truncate(status, fileNameWidth));
@@ -414,8 +401,8 @@ function renderHeader(cols, status) {
 function renderTabs(cols) {
   let used = 0;
   let output = '';
-  for (let index = 0; index < buffers.length; index++) {
-    const buffer = buffers[index];
+  for (let index = 0; index < document.buffers.length; index++) {
+    const buffer = document.buffers[index];
     const name = truncate(bufferName(buffer), 14);
     const plain = ` ${index + 1}:${name}${buffer.dirty ? ' ●' : ''} `;
     if (used + plain.length > cols) {
@@ -423,7 +410,7 @@ function renderTabs(cols) {
       break;
     }
     const label = buffer.dirty ? ` ${index + 1}:${name} ${style.yellow('●')} ` : plain;
-    output += index === activeBufferIndex ? style.mode(label) : style.dim(label);
+    output += index === document.activeBufferIndex ? style.mode(label) : style.dim(label);
     used += plain.length;
   }
   return output || ' ';
@@ -511,7 +498,8 @@ function save(targetPath = filePath) {
     return false;
   }
   saveFile(targetPath, lines);
-  dirty = false;
+  documentModel.markSaved(activeBuffer());
+  dirty = activeBuffer().dirty;
   syncActiveBuffer();
   return true;
 }
@@ -519,9 +507,11 @@ function save(targetPath = filePath) {
 function saveAs(targetPath) {
   const resolved = saveAsFile(targetPath, lines);
   if (resolved) {
-    filePath = resolved;
-    dirty = false;
-    version++;
+    documentModel.setBufferFilePath(activeBuffer(), resolved);
+    documentModel.markSaved(activeBuffer());
+    filePath = activeBuffer().filePath;
+    dirty = activeBuffer().dirty;
+    version = activeBuffer().version;
     refreshSyntax();
     syncActiveBuffer();
   }
@@ -539,7 +529,7 @@ function quit() {
 
 function requestQuit() {
   syncActiveBuffer();
-  if (buffers.some(buffer => buffer.dirty) && !quitConfirm) {
+  if (document.buffers.some(buffer => buffer.dirty) && !quitConfirm) {
     quitConfirm = true;
     render();
     return;

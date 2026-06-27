@@ -1,4 +1,5 @@
 const path = require('path');
+const documentModel = require('./documentModel');
 
 const javascriptExtensions = new Set(['.js', '.jsx', '.mjs', '.cjs']);
 
@@ -167,7 +168,7 @@ function detectLanguage(filePath) {
 }
 
 function linesToText(lines) {
-  return lines.join('\n');
+  return documentModel.linesToText(lines);
 }
 
 function parseJavaScript(lines) {

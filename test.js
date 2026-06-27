@@ -1,7 +1,10 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const EventEmitter = require('events');
 const { loadFile, saveFile, resolveSaveAsPath, saveAsFile } = require('./editorCore');
+const documentModel = require('./documentModel');
+const { createLspClient, encodeMessage, createMessageParser } = require('./lspClient');
 const syntaxService = require('./syntaxService');
 const {
   createEditorState,
@@ -326,6 +329,174 @@ describe('multi-buffer editor state behavior', () => {
     expect(first.dirty).toBe(false);
     expect(second.dirty).toBe(true);
     expect(fs.readFileSync(path.join(tmpDir, 'first.txt'), 'utf8')).toBe('first changed');
+  });
+});
+
+describe('document model', () => {
+  test('creates a document with one unnamed buffer by default', () => {
+    const document = documentModel.createDocument();
+
+    expect(document.buffers).toEqual([
+      expect.objectContaining({ id: 1, filePath: null, lines: [''], dirty: false, version: 0 }),
+    ]);
+    expect(documentModel.activeBuffer(document)).toBe(document.buffers[0]);
+  });
+
+  test('loads initial paths and switches active buffers', () => {
+    const document = documentModel.createDocument(['/tmp/a.txt', '/tmp/b.txt'], filePath => [path.basename(filePath)]);
+
+    expect(document.buffers.map(buffer => buffer.lines)).toEqual([['a.txt'], ['b.txt']]);
+    expect(documentModel.switchBuffer(document, 1)).toBe(document.buffers[1]);
+    expect(documentModel.switchBuffer(document, 1)).toBe(document.buffers[0]);
+    expect(documentModel.switchBuffer(document, -1)).toBe(document.buffers[1]);
+  });
+
+  test('adds buffers and finds them by path', () => {
+    const document = documentModel.createDocument();
+    const added = documentModel.addBuffer(document, '/tmp/new.txt', ['new']);
+
+    expect(added).toEqual(expect.objectContaining({ id: 2, filePath: '/tmp/new.txt', lines: ['new'] }));
+    expect(documentModel.activeBuffer(document)).toBe(added);
+    expect(documentModel.findBufferIndex(document, '/tmp/new.txt')).toBe(1);
+    expect(documentModel.findBufferIndex(document, '/tmp/missing.txt')).toBe(-1);
+  });
+
+  test('tracks buffer dirty and version lifecycle', () => {
+    const buffer = documentModel.createBuffer(1, '/tmp/example.txt', ['hello']);
+
+    documentModel.markChanged(buffer);
+    expect(buffer.dirty).toBe(true);
+    expect(buffer.version).toBe(1);
+
+    documentModel.markSaved(buffer);
+    expect(buffer.dirty).toBe(false);
+    expect(buffer.version).toBe(1);
+
+    documentModel.setBufferFilePath(buffer, '/tmp/renamed.txt');
+    expect(buffer.filePath).toBe('/tmp/renamed.txt');
+    expect(buffer.version).toBe(2);
+  });
+
+  test('converts between line positions and text offsets', () => {
+    const lines = ['abc', 'de', 'f'];
+
+    expect(documentModel.linesToText(lines)).toBe('abc\nde\nf');
+    expect(documentModel.positionToOffset(lines, 1, 1)).toBe(5);
+    expect(documentModel.offsetToPosition(lines, 5)).toEqual({ row: 1, col: 1 });
+    expect(documentModel.positionToOffset(lines, 99, 99)).toBe(8);
+    expect(documentModel.offsetToPosition(lines, 99)).toEqual({ row: 2, col: 1 });
+  });
+
+  test('creates normalized document events with full text changes', () => {
+    const buffer = documentModel.createBuffer(7, '/tmp/example.js', ['const a = 1;', 'a;']);
+    documentModel.markChanged(buffer);
+
+    expect(documentModel.documentOpenEvent(buffer)).toEqual(expect.objectContaining({
+      type: 'documentOpen',
+      bufferId: 7,
+      uri: 'file:///tmp/example.js',
+      languageId: 'javascript',
+      version: 1,
+      text: 'const a = 1;\na;',
+    }));
+    expect(documentModel.documentChangeEvent(buffer)).toEqual(expect.objectContaining({
+      type: 'documentChange',
+      reason: 'change',
+      uri: 'file:///tmp/example.js',
+      version: 1,
+      contentChanges: [{ text: 'const a = 1;\na;' }],
+    }));
+    expect(documentModel.documentSaveEvent(buffer)).toEqual(expect.objectContaining({
+      type: 'documentSave',
+      uri: 'file:///tmp/example.js',
+      text: 'const a = 1;\na;',
+    }));
+  });
+});
+
+describe('lsp client', () => {
+  class FakeTransport extends EventEmitter {
+    constructor() {
+      super();
+      this.messages = [];
+      this.ended = false;
+      this.parse = createMessageParser(message => {
+        this.messages.push(message);
+        if (message.id !== undefined) {
+          const result = message.method === 'initialize' ? { capabilities: { textDocumentSync: 1 } } : null;
+          this.emit('data', encodeMessage({ jsonrpc: '2.0', id: message.id, result }));
+        }
+      });
+    }
+
+    write(message) {
+      this.parse(Buffer.from(message));
+    }
+
+    end() {
+      this.ended = true;
+    }
+  }
+
+  test('initializes, sends full-document sync notifications, and shuts down', async () => {
+    const transport = new FakeTransport();
+    const client = createLspClient({ transport, rootUri: 'file:///tmp/project' });
+    const buffer = documentModel.createBuffer(1, '/tmp/project/example.js', ['const a = 1;']);
+
+    client.start();
+    await expect(client.initialize()).resolves.toEqual({ capabilities: { textDocumentSync: 1 } });
+    client.didOpen(buffer);
+    buffer.lines = ['const a = 2;', 'a;'];
+    documentModel.markChanged(buffer);
+    client.didChange(buffer);
+    client.didSave(buffer);
+    await expect(client.shutdown()).resolves.toBe(null);
+
+    expect(transport.messages.map(message => message.method)).toEqual([
+      'initialize',
+      'textDocument/didOpen',
+      'textDocument/didChange',
+      'textDocument/didSave',
+      'shutdown',
+      'exit',
+    ]);
+    expect(transport.messages[0].params).toEqual(expect.objectContaining({
+      processId: null,
+      rootUri: 'file:///tmp/project',
+      capabilities: {},
+    }));
+    expect(transport.messages[1].params.textDocument).toEqual({
+      uri: 'file:///tmp/project/example.js',
+      languageId: 'javascript',
+      version: 0,
+      text: 'const a = 1;',
+    });
+    expect(transport.messages[2].params).toEqual({
+      textDocument: {
+        uri: 'file:///tmp/project/example.js',
+        version: 1,
+      },
+      contentChanges: [{ text: 'const a = 2;\na;' }],
+    });
+    expect(transport.messages[2].params.contentChanges[0].range).toBeUndefined();
+    expect(transport.messages[3].params).toEqual({
+      textDocument: { uri: 'file:///tmp/project/example.js' },
+      text: 'const a = 2;\na;',
+    });
+    expect(transport.ended).toBe(true);
+  });
+
+  test('starts a configured server process over stdio', () => {
+    const fakeProcess = {
+      pid: 123,
+      stdin: { write: jest.fn(), end: jest.fn() },
+      stdout: new EventEmitter(),
+    };
+    const spawn = jest.fn(() => fakeProcess);
+    const client = createLspClient({ command: 'language-server', args: ['--stdio'], cwd: '/tmp/project', spawn });
+
+    expect(client.start()).toBe(fakeProcess);
+    expect(spawn).toHaveBeenCalledWith('language-server', ['--stdio'], { cwd: '/tmp/project', stdio: 'pipe' });
   });
 });
 
