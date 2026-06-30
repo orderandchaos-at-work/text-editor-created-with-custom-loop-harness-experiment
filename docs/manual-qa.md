@@ -49,19 +49,14 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Pressing `Enter` after replacement text updates only the current match.
 - [ ] Pressing `Ctrl+R` after replacement text updates every matching substring.
 
-## Tree-sitter JavaScript and TypeScript support
+## Tree-sitter JavaScript support
 
-- [ ] `npm install` has installed `tree-sitter`, `tree-sitter-javascript`, and `tree-sitter-typescript` before Tree-sitter QA starts.
-- [ ] `npm test` passes with no skipped Tree-sitter runtime tests.
+- [ ] `npm install` has installed `tree-sitter` and `tree-sitter-javascript` before Tree-sitter QA starts.
+- [ ] `npm test` passes.
 - [ ] Opening a `.js` file shows syntax highlighting when color is enabled.
-- [ ] Opening a `.ts` file shows syntax highlighting when color is enabled.
-- [ ] Opening a `.tsx` file shows syntax highlighting when color is enabled.
 - [ ] A valid `.js` file shows `AST ok` in the status row.
-- [ ] A valid `.ts` or `.tsx` file shows `AST ok` in the status row.
 - [ ] A `.js` file with invalid syntax shows an AST syntax error count in the status row.
-- [ ] A `.ts` file with invalid syntax shows an AST syntax error count in the status row.
 - [ ] Editing a `.js` file updates AST status and highlights after the edit.
-- [ ] Editing a `.ts` or `.tsx` file updates AST status and highlights after the edit.
 - [ ] Switching between buffers keeps AST status/highlights associated with the correct buffer.
 - [ ] `Ctrl+T` opens the tree query/preset prompt.
 - [ ] Entering `(function_declaration name: (identifier) @function.name)` highlights matching JavaScript function names.
@@ -70,8 +65,6 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Entering `imports` highlights import statements.
 - [ ] Entering `calls` highlights call expressions.
 - [ ] Entering `calls:foo` highlights calls to `foo` only.
-- [ ] In a TypeScript file, entering `interfaces` highlights interface declarations.
-- [ ] In a TypeScript file, entering `types` highlights type aliases.
 - [ ] Entering `syntax-errors` highlights syntax error nodes.
 - [ ] `Ctrl+G` jumps to the next tree query match.
 - [ ] `Ctrl+Shift+G` jumps to the previous tree query match.

@@ -2,7 +2,6 @@ const path = require('path');
 const documentModel = require('./documentModel');
 
 const javascriptExtensions = new Set(['.js', '.jsx', '.mjs', '.cjs']);
-const typescriptExtensions = new Set(['.ts', '.tsx']);
 
 const highlightQuery = `
 (identifier) @variable
@@ -122,64 +121,6 @@ const highlightQuery = `
 (ERROR) @error
 `;
 
-const typescriptHighlightQuery = `
-(identifier) @variable
-(property_identifier) @property
-(function_declaration name: (identifier) @function)
-(method_definition name: (property_identifier) @function.method)
-(call_expression function: (identifier) @function.call)
-(call_expression function: (member_expression property: (property_identifier) @function.method))
-(class_declaration name: (type_identifier) @constructor)
-(type_identifier) @type
-(predefined_type) @type
-(interface_declaration name: (type_identifier) @constructor)
-(type_alias_declaration name: (type_identifier) @type)
-[
-  "abstract"
-  "as"
-  "async"
-  "await"
-  "class"
-  "const"
-  "declare"
-  "enum"
-  "export"
-  "extends"
-  "from"
-  "function"
-  "get"
-  "if"
-  "implements"
-  "import"
-  "in"
-  "interface"
-  "keyof"
-  "let"
-  "namespace"
-  "new"
-  "of"
-  "override"
-  "private"
-  "protected"
-  "public"
-  "readonly"
-  "return"
-  "satisfies"
-  "set"
-  "static"
-  "type"
-  "typeof"
-  "var"
-  "void"
-  "while"
-  "yield"
-] @keyword
-(comment) @comment
-(string) @string
-(number) @number
-(ERROR) @error
-`;
-
 const astSearchPresets = {
   functions: `[
     (function_declaration name: (identifier) @function.name)
@@ -199,12 +140,6 @@ const astSearchPresets = {
   'syntax-errors': `(ERROR) @syntax.error`,
 };
 
-const typescriptAstSearchPresets = {
-  ...astSearchPresets,
-  interfaces: `(interface_declaration name: (type_identifier) @interface.name)`,
-  types: `(type_alias_declaration name: (type_identifier) @type.name)`,
-};
-
 let treeSitter;
 const loadedLanguages = new Map();
 const bufferStates = new Map();
@@ -217,12 +152,6 @@ function loadTreeSitter() {
 function languageDefinition(languageName) {
   if (languageName === 'javascript') {
     return { packageName: 'tree-sitter-javascript', exportName: null, highlightQuery, astSearchPresets };
-  }
-  if (languageName === 'typescript') {
-    return { packageName: 'tree-sitter-typescript', exportName: 'typescript', highlightQuery: typescriptHighlightQuery, astSearchPresets: typescriptAstSearchPresets };
-  }
-  if (languageName === 'tsx') {
-    return { packageName: 'tree-sitter-typescript', exportName: 'tsx', highlightQuery: typescriptHighlightQuery, astSearchPresets: typescriptAstSearchPresets };
   }
   return null;
 }
@@ -261,7 +190,6 @@ function detectLanguage(filePath) {
   if (!filePath) return null;
   const extension = path.extname(filePath).toLowerCase();
   if (javascriptExtensions.has(extension)) return 'javascript';
-  if (typescriptExtensions.has(extension)) return extension === '.tsx' ? 'tsx' : 'typescript';
   return null;
 }
 

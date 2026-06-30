@@ -1,6 +1,6 @@
 # text-editor
 
-A small terminal text editor built with Node.js. It opens in an alternate terminal screen, supports multiple buffers, and provides basic editing, search, replace, open, save, save-as, and JavaScript/TypeScript Tree-sitter workflows.
+A small terminal text editor built with Node.js. It opens in an alternate terminal screen, supports multiple buffers, and provides basic editing, search, replace, open, save, save-as, and JavaScript Tree-sitter workflows.
 
 ## Requirements
 
@@ -71,9 +71,9 @@ The controls below mirror the shared keybinding metadata in `keybindings.js`, wh
 - `Ctrl+R` opens replace mode. Enter the search text, press `Enter`, enter the replacement text, then press `Enter` to replace the current match.
 - In replace mode, after entering replacement text, `Ctrl+R` replaces all matches.
 
-## JavaScript and TypeScript AST, syntax highlighting, and tree search
+## JavaScript AST, syntax highlighting, and tree search
 
-JavaScript-like files (`.js`, `.jsx`, `.mjs`, `.cjs`) and TypeScript files (`.ts`, `.tsx`) are parsed with Tree-sitter.
+JavaScript-like files (`.js`, `.jsx`, `.mjs`, `.cjs`) are parsed with Tree-sitter.
 
 - Syntax highlighting is rendered from Tree-sitter query captures.
 - Parsed syntax trees, highlights, errors, and tree search matches are cached per buffer and refreshed after edits.
@@ -89,8 +89,6 @@ Friendly tree search presets:
 - `calls:<name>`
 - `variables`
 - `syntax-errors`
-- `interfaces` for TypeScript and TSX
-- `types` for TypeScript and TSX
 
 Example tree query:
 

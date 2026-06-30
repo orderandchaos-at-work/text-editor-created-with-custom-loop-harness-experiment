@@ -110,8 +110,8 @@ describe('syntax service', () => {
   test('detects JavaScript files', () => {
     expect(syntaxService.detectLanguage('/tmp/example.js')).toBe('javascript');
     expect(syntaxService.detectLanguage('/tmp/example.mjs')).toBe('javascript');
-    expect(syntaxService.detectLanguage('/tmp/example.ts')).toBe('typescript');
-    expect(syntaxService.detectLanguage('/tmp/example.tsx')).toBe('tsx');
+    expect(syntaxService.detectLanguage('/tmp/example.ts')).toBe(null);
+    expect(syntaxService.detectLanguage('/tmp/example.tsx')).toBe(null);
     expect(syntaxService.detectLanguage('/tmp/example.txt')).toBe(null);
   });
 
@@ -120,8 +120,6 @@ describe('syntax service', () => {
   });
 
   const testWithTreeSitter = syntaxService.isTreeSitterAvailable() ? test : test.skip;
-  const testWithTypeScript = syntaxService.isLanguageAvailable('typescript') ? test : test.skip;
-  const testWithTsx = syntaxService.isLanguageAvailable('tsx') ? test : test.skip;
 
   testWithTreeSitter('parses JavaScript and reports syntax errors', () => {
     const valid = syntaxService.parse(['function hello() {', '  return 1;', '}'], '/tmp/example.js');
@@ -406,56 +404,6 @@ describe('syntax service', () => {
     expect(syntaxService.getBufferState('clear-buffer-b')).toEqual(expect.objectContaining({ bufferId: 'clear-buffer-b' }));
   });
 
-  testWithTypeScript('parses and highlights TypeScript syntax', () => {
-    const lines = [
-      'interface User { name: string }',
-      'type Count = number;',
-      'const getName = (user: User): string => user.name;',
-    ];
-    const state = syntaxService.updateBuffer('ts-buffer', lines, '/tmp/example.ts', 1);
-
-    expect(state).toEqual(expect.objectContaining({
-      supported: true,
-      available: true,
-      languageName: 'typescript',
-      errors: [],
-    }));
-    expect(state.highlights).toEqual(expect.arrayContaining([
-      expect.objectContaining({ capture: 'keyword', text: 'interface' }),
-      expect.objectContaining({ capture: 'constructor', text: 'User' }),
-      expect.objectContaining({ capture: 'type', text: 'Count' }),
-      expect.objectContaining({ capture: 'type', text: 'string' }),
-    ]));
-    expect(syntaxService.highlight(lines, '/tmp/example.ts')).toEqual(expect.arrayContaining([
-      expect.objectContaining({ capture: 'type', text: 'Count' }),
-    ]));
-  });
-
-  testWithTsx('parses TSX syntax', () => {
-    const state = syntaxService.updateBuffer('tsx-buffer', ['type Props = { name: string };', 'export const View = (props: Props) => <div>{props.name}</div>;'], '/tmp/example.tsx', 1);
-
-    expect(state).toEqual(expect.objectContaining({
-      supported: true,
-      available: true,
-      languageName: 'tsx',
-      errors: [],
-    }));
-    expect(state.highlights).toEqual(expect.arrayContaining([
-      expect.objectContaining({ capture: 'type', text: 'Props' }),
-      expect.objectContaining({ capture: 'keyword', text: 'export' }),
-    ]));
-  });
-
-  testWithTypeScript('supports TypeScript tree search presets', () => {
-    syntaxService.updateBuffer('ts-query-buffer', ['interface User {}', 'type Count = number;'], '/tmp/example.ts', 1);
-
-    expect(syntaxService.treeSearchBuffer('ts-query-buffer', 'interfaces').matches).toEqual([
-      expect.objectContaining({ capture: 'interface.name', text: 'User' }),
-    ]);
-    expect(syntaxService.treeSearchBuffer('ts-query-buffer', 'types').matches).toEqual([
-      expect.objectContaining({ capture: 'type.name', text: 'Count' }),
-    ]);
-  });
 });
 
 describe('multi-buffer editor state behavior', () => {
