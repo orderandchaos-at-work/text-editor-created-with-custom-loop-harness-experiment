@@ -2,7 +2,7 @@ task_source:
   provider: local
   url: http://localhost:8080
   username: jsonrpc
-  token_file: .smolclaw/kanboard/api-token
+  token: d61a19f0610ae485c00bddb0ecad911a7b2ac3c1754c1d72f37652fd08174c84
   project: text-editor
   eligible_statuses: [Backlog]
   in_progress_status: Work in progress
