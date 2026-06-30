@@ -298,8 +298,8 @@ async function showHover() {
   const row = cursorRow;
   const col = cursorCol;
   const languageId = documentModel.languageIdForFilePath(filePath);
-  if (languageId !== 'javascript') {
-    lspHoverMessage = 'LSP hover: JavaScript files only';
+  if (languageId === 'plaintext') {
+    lspHoverMessage = 'LSP hover: language not supported';
     render();
     return;
   }
@@ -422,6 +422,7 @@ function styleCapture(capture, text) {
   if (capture === 'function.method') return style.cyan(text);
   if (capture === 'property') return style.yellow(text);
   if (capture === 'constructor') return style.cyan(text);
+  if (capture === 'type') return style.cyan(text);
   if (capture === 'constant') return style.yellow(text);
   if (capture === 'constant.builtin') return style.yellow(text);
   if (capture === 'variable.builtin') return style.magenta(text);
@@ -558,8 +559,8 @@ function renderSidebarLines(height, width) {
   const lspStatus = languageId ? lspManager.status.get(languageId) : null;
   const lines = [style.bold(' LSP')];
 
-  if (languageId !== 'javascript') {
-    lines.push('', style.dim(' JavaScript files only'));
+  if (languageId === 'plaintext') {
+    lines.push('', style.dim(' Language not supported'));
   } else if (!lspManager.isSupported(buffer)) {
     lines.push('', style.yellow(' Not enabled'));
   } else if (lspStatus && lspStatus.available === false) {
