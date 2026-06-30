@@ -2,27 +2,42 @@
 
 ## Current implementation status
 
-The editor now has the JavaScript syntax, document-model, LSP diagnostics, and LSP hover foundations in place.
+The editor now has the JavaScript and TypeScript syntax, document-model, LSP diagnostics, and LSP hover foundations in place.
 
 Implemented:
 
 - Core terminal editor with multiple buffers, open/save/save-as, search, replace, and Tree-sitter query search.
 - JavaScript language detection for `.js`, `.jsx`, `.mjs`, and `.cjs`.
+- TypeScript language detection for `.ts` and `.tsx`.
 - Tree-sitter JavaScript parsing, syntax highlighting, syntax errors, and friendly AST search presets.
+- Tree-sitter TypeScript/TSX parser setup, syntax highlighting, syntax errors, syntax cache integration, and TypeScript-specific `interfaces` and `types` AST search presets.
 - Per-buffer syntax cache in `syntaxService.js`; render consumes prepared syntax state and does not parse every render.
 - Multi-buffer state coverage for cursor, dirty state, save behavior, and syntax cache isolation.
 - `documentModel.js` owns buffer/document helpers, text snapshots, position/offset conversion, versioning, dirty state, and normalized document open/change/save events.
 - `lspClient.js` provides a minimal JSON-RPC/LSP client with fake-transport tests.
 - JavaScript LSP diagnostics default to `typescript-language-server --stdio`, with `TEXT_EDITOR_JS_LSP` and `TEXT_EDITOR_JS_LSP_ARGS` available for overrides and `TEXT_EDITOR_JS_LSP=0` for opt-out.
-- LSP lifecycle wiring sends `didOpen`, full-document `didChange`, `didSave`, and best-effort shutdown for configured JavaScript buffers.
+- TypeScript and TSX LSP diagnostics also default to `typescript-language-server --stdio`, with `TEXT_EDITOR_TS_LSP` and `TEXT_EDITOR_TS_LSP_ARGS` available for overrides and `TEXT_EDITOR_TS_LSP=0` for opt-out.
+- LSP lifecycle wiring sends `didOpen`, full-document `didChange`, `didSave`, and best-effort shutdown for configured JavaScript, TypeScript, and TSX buffers.
 - `textDocument/publishDiagnostics` notifications are stored per buffer URI and shown in the LSP sidebar for the active buffer when the terminal is wide enough, with a narrow-terminal status row fallback.
-- `Ctrl+Space` requests `textDocument/hover` for the active JavaScript buffer and cursor position, with `F1` as a fallback for terminals or OS shortcuts that intercept `Ctrl+Space`.
+- `Ctrl+Space` requests `textDocument/hover` for the active supported LSP buffer and cursor position, with `F1` as a fallback for terminals or OS shortcuts that intercept `Ctrl+Space`.
 - Hover requests show immediate loading feedback, then normalized readable text in the LSP sidebar, and clear after cursor movement or edits.
 - Missing or unstartable LSP servers are handled without crashing the editor.
 
 Current verification:
 
 - `npm test` passes with fake LSP clients/transports and no required external language server.
+
+## Completed follow-up: Add TypeScript/TSX language support
+
+TypeScript/TSX was selected as the first broader language path because `tree-sitter-typescript` provides CommonJS-compatible `typescript` and `tsx` grammar exports, TypeScript/TSX can reuse the existing `typescript-language-server --stdio` dev dependency, and compact fixtures can cover syntax and LSP behavior without destabilizing JavaScript.
+
+Implemented behavior:
+
+- `.ts` files map to the Tree-sitter `typescript` grammar and LSP `typescript` language ID.
+- `.tsx` files map to the Tree-sitter `tsx` grammar and LSP `typescriptreact` language ID.
+- TypeScript highlighting adds type, interface, and type alias coverage on top of the existing JavaScript query coverage.
+- TypeScript/TSX tree search supports the shared JavaScript presets plus `interfaces` and `types`.
+- TypeScript/TSX LSP can be overridden with `TEXT_EDITOR_TS_LSP` and `TEXT_EDITOR_TS_LSP_ARGS`, or disabled with `TEXT_EDITOR_TS_LSP=0` or `TEXT_EDITOR_TS_LSP=false`.
 
 ## Completed follow-up: Manually QA JavaScript LSP hover
 
@@ -38,7 +53,11 @@ Verified behavior:
 - Hover text clears after cursor movement or edits.
 - Diagnostics remain visible in the LSP sidebar independently of hover text.
 
-## 1. Add go to definition: same-file jumps
+## 1. Run TypeScript/TSX manual QA after install
+
+After `npm install` installs `tree-sitter-typescript`, run the TypeScript/TSX syntax and LSP checks in `docs/manual-qa.md`.
+
+## 2. Add go to definition: same-file jumps
 
 After hover is stable, add `textDocument/definition`.
 
@@ -48,7 +67,7 @@ First scope:
 - Jump only when the returned location points to the current buffer URI.
 - Add fake LSP coverage for request/response normalization.
 
-## 2. Add go to definition: cross-file targets
+## 3. Add go to definition: cross-file targets
 
 After same-file jumps work, support target URIs outside the current buffer.
 
@@ -58,7 +77,7 @@ Scope:
 - Move the cursor to the returned target range.
 - Handle missing or unreadable files without crashing.
 
-## 3. Add jump-back history
+## 4. Add jump-back history
 
 Definition jumps should save the previous buffer and cursor position.
 
@@ -68,7 +87,7 @@ Scope:
 - Add a keybinding to return to the previous location.
 - Keep the initial history as a simple stack.
 
-## 4. Improve diagnostic display
+## 5. Improve diagnostic display
 
 Diagnostics currently appear in the LSP sidebar when space is available. Next UI improvements can be incremental:
 
@@ -76,7 +95,7 @@ Diagnostics currently appear in the LSP sidebar when space is available. Next UI
 - Keep inline underlines for later because they must merge with syntax, search, and tree-search decorations.
 - Preserve active-buffer diagnostic isolation.
 
-## 5. Add Tree-sitter incremental edit support
+## 6. Add Tree-sitter incremental edit support
 
 The editor currently reparses supported buffers with full-buffer Tree-sitter parses.
 
@@ -87,7 +106,7 @@ Scope:
 - Reparse with the old tree.
 - Add tests for multi-line edits and range/offset conversion.
 
-## 6. Design completion UI
+## 7. Design completion UI
 
 Completion is more UI-heavy than hover or definition.
 
@@ -99,7 +118,7 @@ Before implementing it, decide how the terminal popup/list should work:
 - cancellation on movement/edit
 - display limits for small terminal windows
 
-## 7. Implement completion
+## 8. Implement completion
 
 After the UI behavior is decided, add LSP completion support.
 
@@ -110,7 +129,7 @@ Scope:
 - Insert the selected completion item safely.
 - Add fake LSP and UI-state tests.
 
-## 8. Add references
+## 9. Add references
 
 Scope:
 
@@ -118,7 +137,7 @@ Scope:
 - Present results in the sidebar or a quick list.
 - Support jumping between reference results.
 
-## 9. Add rename
+## 10. Add rename
 
 Scope:
 
@@ -126,7 +145,7 @@ Scope:
 - Preview and apply workspace edits safely.
 - Handle multi-file edits carefully.
 
-## 10. Add formatting
+## 11. Add formatting
 
 Scope:
 
@@ -134,20 +153,20 @@ Scope:
 - Apply returned text edits through the document model.
 - Preserve dirty-state and version tracking.
 
-## 11. Consider incremental LSP sync later
+## 12. Consider incremental LSP sync later
 
 The editor currently uses full-document LSP sync. Keep it that way until the document model owns normalized edit application more completely.
 
 Incremental sync should wait until edits flow through one model boundary that can emit reliable ranges and replacement text.
 
-## 12. Continue editor polish
+## 13. Continue editor polish
 
 Remaining non-LSP polish:
 
 - horizontal scrolling for long lines
 - better Unicode display-width handling
 - consolidated keybinding metadata for input handling, README controls, and help text
-- broader language support only after the JavaScript LSP path remains stable
+- broader language support only after the JavaScript and TypeScript LSP paths remain stable
 
 Before adding any dependency, verify CommonJS compatibility and keep the dependency set minimal.
 

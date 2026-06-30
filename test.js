@@ -98,7 +98,7 @@ describe('keybinding metadata', () => {
   test('keeps documented controls and input matching in one metadata table', () => {
     expect(keybindings.readmeRows()).toEqual(expect.arrayContaining([
       ['Ctrl+S', 'Save current buffer'],
-      ['Ctrl+Space / F1', 'LSP hover for the current JavaScript symbol'],
+      ['Ctrl+Space / F1', 'LSP hover for the current supported-language symbol'],
     ]));
     expect(keybindings.matches('save', { ctrl: true, name: 's' })).toBe(true);
     expect(keybindings.matches('hover', { name: 'f1' })).toBe(true);
@@ -110,6 +110,8 @@ describe('syntax service', () => {
   test('detects JavaScript files', () => {
     expect(syntaxService.detectLanguage('/tmp/example.js')).toBe('javascript');
     expect(syntaxService.detectLanguage('/tmp/example.mjs')).toBe('javascript');
+    expect(syntaxService.detectLanguage('/tmp/example.ts')).toBe('typescript');
+    expect(syntaxService.detectLanguage('/tmp/example.tsx')).toBe('tsx');
     expect(syntaxService.detectLanguage('/tmp/example.txt')).toBe(null);
   });
 
@@ -118,6 +120,8 @@ describe('syntax service', () => {
   });
 
   const testWithTreeSitter = syntaxService.isTreeSitterAvailable() ? test : test.skip;
+  const testWithTypeScript = syntaxService.isLanguageAvailable('typescript') ? test : test.skip;
+  const testWithTsx = syntaxService.isLanguageAvailable('tsx') ? test : test.skip;
 
   testWithTreeSitter('parses JavaScript and reports syntax errors', () => {
     const valid = syntaxService.parse(['function hello() {', '  return 1;', '}'], '/tmp/example.js');
@@ -342,6 +346,57 @@ describe('syntax service', () => {
     expect(syntaxService.getBufferState('clear-buffer-a')).toBe(null);
     expect(syntaxService.getBufferState('clear-buffer-b')).toEqual(expect.objectContaining({ bufferId: 'clear-buffer-b' }));
   });
+
+  testWithTypeScript('parses and highlights TypeScript syntax', () => {
+    const lines = [
+      'interface User { name: string }',
+      'type Count = number;',
+      'const getName = (user: User): string => user.name;',
+    ];
+    const state = syntaxService.updateBuffer('ts-buffer', lines, '/tmp/example.ts', 1);
+
+    expect(state).toEqual(expect.objectContaining({
+      supported: true,
+      available: true,
+      languageName: 'typescript',
+      errors: [],
+    }));
+    expect(state.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'keyword', text: 'interface' }),
+      expect.objectContaining({ capture: 'constructor', text: 'User' }),
+      expect.objectContaining({ capture: 'type', text: 'Count' }),
+      expect.objectContaining({ capture: 'type', text: 'string' }),
+    ]));
+    expect(syntaxService.highlight(lines, '/tmp/example.ts')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'type', text: 'Count' }),
+    ]));
+  });
+
+  testWithTsx('parses TSX syntax', () => {
+    const state = syntaxService.updateBuffer('tsx-buffer', ['type Props = { name: string };', 'export const View = (props: Props) => <div>{props.name}</div>;'], '/tmp/example.tsx', 1);
+
+    expect(state).toEqual(expect.objectContaining({
+      supported: true,
+      available: true,
+      languageName: 'tsx',
+      errors: [],
+    }));
+    expect(state.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'type', text: 'Props' }),
+      expect.objectContaining({ capture: 'keyword', text: 'export' }),
+    ]));
+  });
+
+  testWithTypeScript('supports TypeScript tree search presets', () => {
+    syntaxService.updateBuffer('ts-query-buffer', ['interface User {}', 'type Count = number;'], '/tmp/example.ts', 1);
+
+    expect(syntaxService.treeSearchBuffer('ts-query-buffer', 'interfaces').matches).toEqual([
+      expect.objectContaining({ capture: 'interface.name', text: 'User' }),
+    ]);
+    expect(syntaxService.treeSearchBuffer('ts-query-buffer', 'types').matches).toEqual([
+      expect.objectContaining({ capture: 'type.name', text: 'Count' }),
+    ]);
+  });
 });
 
 describe('multi-buffer editor state behavior', () => {
@@ -469,6 +524,11 @@ describe('document model', () => {
       textDocument: { uri: 'file:///tmp/example.js' },
       position: { line: 0, character: 6 },
     });
+  });
+
+  test('maps TypeScript file extensions to LSP language IDs', () => {
+    expect(documentModel.languageIdForFilePath('/tmp/example.ts')).toBe('typescript');
+    expect(documentModel.languageIdForFilePath('/tmp/example.tsx')).toBe('typescriptreact');
   });
 });
 
@@ -719,9 +779,17 @@ describe('lsp manager', () => {
         command: 'typescript-language-server',
         args: ['--stdio'],
       },
+      typescript: {
+        command: 'typescript-language-server',
+        args: ['--stdio'],
+      },
+      typescriptreact: {
+        command: 'typescript-language-server',
+        args: ['--stdio'],
+      },
     });
-    expect(defaultLspConfigs({ TEXT_EDITOR_JS_LSP: '0' })).toEqual({});
-    expect(defaultLspConfigs({ TEXT_EDITOR_JS_LSP: 'false' })).toEqual({});
+    expect(defaultLspConfigs({ TEXT_EDITOR_JS_LSP: '0', TEXT_EDITOR_TS_LSP: '0' })).toEqual({});
+    expect(defaultLspConfigs({ TEXT_EDITOR_JS_LSP: 'false', TEXT_EDITOR_TS_LSP: 'false' })).toEqual({});
     expect(defaultLspConfigs({
       TEXT_EDITOR_JS_LSP: 'custom-language-server',
       TEXT_EDITOR_JS_LSP_ARGS: '--stdio --log-level 4',
@@ -729,6 +797,31 @@ describe('lsp manager', () => {
       javascript: {
         command: 'custom-language-server',
         args: ['--stdio', '--log-level', '4'],
+      },
+      typescript: {
+        command: 'typescript-language-server',
+        args: ['--stdio'],
+      },
+      typescriptreact: {
+        command: 'typescript-language-server',
+        args: ['--stdio'],
+      },
+    });
+    expect(defaultLspConfigs({
+      TEXT_EDITOR_TS_LSP: 'custom-ts-server',
+      TEXT_EDITOR_TS_LSP_ARGS: '--stdio',
+    })).toEqual({
+      javascript: {
+        command: 'typescript-language-server',
+        args: ['--stdio'],
+      },
+      typescript: {
+        command: 'custom-ts-server',
+        args: ['--stdio'],
+      },
+      typescriptreact: {
+        command: 'custom-ts-server',
+        args: ['--stdio'],
       },
     });
   });
@@ -859,18 +952,25 @@ describe('lsp manager', () => {
     expect(formatHoverContents({ contents: '1234567890' }, 6)).toBe('12345…');
   });
 
-  test('requests hover for configured JavaScript buffers only', async () => {
+  test('requests hover for configured JavaScript and TypeScript buffers only', async () => {
     const client = createFakeClient();
-    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => client });
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' }, typescript: { command: 'ts-lsp' } }, createClient: () => client });
     const jsBuffer = documentModel.createBuffer(1, '/tmp/example.js', ['const value = 1;']);
     const textBuffer = documentModel.createBuffer(2, '/tmp/example.txt', ['plain']);
+    const tsBuffer = documentModel.createBuffer(3, '/tmp/example.ts', ['const value: number = 1;']);
 
     await expect(manager.hover(textBuffer, 0, 1)).resolves.toBe(null);
     await expect(manager.hover(jsBuffer, 0, 6)).resolves.toBe('const value: number');
+    await expect(manager.hover(tsBuffer, 0, 6)).resolves.toBe('const value: number');
 
     expect(client.didOpen).toHaveBeenCalledWith(jsBuffer);
+    expect(client.didOpen).toHaveBeenCalledWith(tsBuffer);
     expect(client.hover).toHaveBeenCalledWith({
       textDocument: { uri: 'file:///tmp/example.js' },
+      position: { line: 0, character: 6 },
+    });
+    expect(client.hover).toHaveBeenCalledWith({
+      textDocument: { uri: 'file:///tmp/example.ts' },
       position: { line: 0, character: 6 },
     });
   });

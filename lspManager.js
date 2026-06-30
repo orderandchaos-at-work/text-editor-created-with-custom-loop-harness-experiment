@@ -7,15 +7,21 @@ function splitArgs(value) {
 }
 
 function defaultLspConfigs(env = process.env) {
-  if (env.TEXT_EDITOR_JS_LSP === '0' || env.TEXT_EDITOR_JS_LSP === 'false') return {};
-  const command = env.TEXT_EDITOR_JS_LSP || 'typescript-language-server';
-  const args = env.TEXT_EDITOR_JS_LSP_ARGS ? splitArgs(env.TEXT_EDITOR_JS_LSP_ARGS) : command.includes('typescript-language-server') ? ['--stdio'] : [];
-  return {
-    javascript: {
+  const configs = {};
+  if (env.TEXT_EDITOR_JS_LSP !== '0' && env.TEXT_EDITOR_JS_LSP !== 'false') {
+    const command = env.TEXT_EDITOR_JS_LSP || 'typescript-language-server';
+    configs.javascript = {
       command,
-      args,
-    },
-  };
+      args: env.TEXT_EDITOR_JS_LSP_ARGS ? splitArgs(env.TEXT_EDITOR_JS_LSP_ARGS) : command.includes('typescript-language-server') ? ['--stdio'] : [],
+    };
+  }
+  if (env.TEXT_EDITOR_TS_LSP !== '0' && env.TEXT_EDITOR_TS_LSP !== 'false') {
+    const command = env.TEXT_EDITOR_TS_LSP || 'typescript-language-server';
+    const args = env.TEXT_EDITOR_TS_LSP_ARGS ? splitArgs(env.TEXT_EDITOR_TS_LSP_ARGS) : command.includes('typescript-language-server') ? ['--stdio'] : [];
+    configs.typescript = { command, args };
+    configs.typescriptreact = { command, args };
+  }
+  return configs;
 }
 
 function formatHoverContents(result, maxLength = 120) {

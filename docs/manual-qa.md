@@ -49,14 +49,19 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Pressing `Enter` after replacement text updates only the current match.
 - [ ] Pressing `Ctrl+R` after replacement text updates every matching substring.
 
-## Tree-sitter JavaScript support
+## Tree-sitter JavaScript and TypeScript support
 
-- [ ] `npm install` has installed `tree-sitter` and `tree-sitter-javascript` before Tree-sitter QA starts.
+- [ ] `npm install` has installed `tree-sitter`, `tree-sitter-javascript`, and `tree-sitter-typescript` before Tree-sitter QA starts.
 - [ ] `npm test` passes with no skipped Tree-sitter runtime tests.
 - [ ] Opening a `.js` file shows syntax highlighting when color is enabled.
+- [ ] Opening a `.ts` file shows syntax highlighting when color is enabled.
+- [ ] Opening a `.tsx` file shows syntax highlighting when color is enabled.
 - [ ] A valid `.js` file shows `AST ok` in the status row.
+- [ ] A valid `.ts` or `.tsx` file shows `AST ok` in the status row.
 - [ ] A `.js` file with invalid syntax shows an AST syntax error count in the status row.
+- [ ] A `.ts` file with invalid syntax shows an AST syntax error count in the status row.
 - [ ] Editing a `.js` file updates AST status and highlights after the edit.
+- [ ] Editing a `.ts` or `.tsx` file updates AST status and highlights after the edit.
 - [ ] Switching between buffers keeps AST status/highlights associated with the correct buffer.
 - [ ] `Ctrl+T` opens the tree query/preset prompt.
 - [ ] Entering `(function_declaration name: (identifier) @function.name)` highlights matching JavaScript function names.
@@ -65,34 +70,47 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Entering `imports` highlights import statements.
 - [ ] Entering `calls` highlights call expressions.
 - [ ] Entering `calls:foo` highlights calls to `foo` only.
+- [ ] In a TypeScript file, entering `interfaces` highlights interface declarations.
+- [ ] In a TypeScript file, entering `types` highlights type aliases.
 - [ ] Entering `syntax-errors` highlights syntax error nodes.
 - [ ] `Ctrl+G` jumps to the next tree query match.
 - [ ] `Ctrl+Shift+G` jumps to the previous tree query match.
 - [ ] `Esc` exits tree query mode without changing the current query results.
 - [ ] A malformed tree query or preset shows a tree error in the status row without crashing.
 
-## JavaScript LSP diagnostics
+## JavaScript and TypeScript LSP diagnostics
 
 - [ ] After `npm install`, running `npm start -- path/to/file.js` for a JavaScript file starts `typescript-language-server --stdio` without extra environment variables.
+- [ ] After `npm install`, running `npm start -- path/to/file.ts` for a TypeScript file starts `typescript-language-server --stdio` without extra environment variables.
 - [ ] Running with `TEXT_EDITOR_JS_LSP=0 npm start -- path/to/file.js` behaves normally and shows no LSP error spam.
+- [ ] Running with `TEXT_EDITOR_TS_LSP=0 npm start -- path/to/file.ts` behaves normally and shows no LSP error spam.
 - [ ] Setting `TEXT_EDITOR_JS_LSP` and `TEXT_EDITOR_JS_LSP_ARGS` overrides the default server command.
+- [ ] Setting `TEXT_EDITOR_TS_LSP` and `TEXT_EDITOR_TS_LSP_ARGS` overrides the default TypeScript/TSX server command.
 - [ ] Opening a `.js`, `.jsx`, `.mjs`, or `.cjs` file starts diagnostics without blocking editor startup.
+- [ ] Opening a `.ts` or `.tsx` file starts diagnostics without blocking editor startup.
 - [ ] A JavaScript diagnostic appears in the LSP sidebar after the language server responds when the terminal is wide enough.
+- [ ] A TypeScript diagnostic appears in the LSP sidebar after the language server responds when the terminal is wide enough.
 - [ ] The LSP sidebar shows server status, hover space, and an active-buffer diagnostics preview.
 - [ ] In a narrow terminal, diagnostics fall back to the status row.
 - [ ] Editing a JavaScript buffer updates diagnostics after full-document `didChange` sync.
 - [ ] Saving a JavaScript buffer keeps the editor responsive and sends `didSave`.
 - [ ] Save-as from an unnamed or differently named buffer to a JavaScript path opens the new URI and saves it.
+- [ ] Save-as from an unnamed or differently named buffer to a TypeScript path opens the new URI and saves it.
 - [ ] Switching buffers shows diagnostics only for the active buffer.
 - [ ] Quitting attempts LSP shutdown and restores the terminal.
 - [ ] Setting `TEXT_EDITOR_JS_LSP` to a missing command does not crash the editor.
+- [ ] Setting `TEXT_EDITOR_TS_LSP` to a missing command does not crash the editor.
 
-## JavaScript LSP hover
+## JavaScript and TypeScript LSP hover
 
 - [ ] After `npm install`, running `npm start -- path/to/file.js` for a JavaScript file enables hover without extra environment variables.
+- [ ] After `npm install`, running `npm start -- path/to/file.ts` for a TypeScript file enables hover without extra environment variables.
 - [ ] Running with `TEXT_EDITOR_JS_LSP=0 npm start -- path/to/file.js` behaves normally when pressing `Ctrl+Space` or `F1` and shows `LSP hover: not enabled`.
+- [ ] Running with `TEXT_EDITOR_TS_LSP=0 npm start -- path/to/file.ts` behaves normally when pressing `Ctrl+Space` or `F1` and shows `LSP hover: not enabled`.
 - [ ] Setting `TEXT_EDITOR_JS_LSP` and `TEXT_EDITOR_JS_LSP_ARGS` overrides the default server command.
+- [ ] Setting `TEXT_EDITOR_TS_LSP` and `TEXT_EDITOR_TS_LSP_ARGS` overrides the default TypeScript/TSX server command.
 - [ ] Place the cursor on a JavaScript symbol and press `Ctrl+Space`.
+- [ ] Place the cursor on a TypeScript symbol or type and press `Ctrl+Space`.
 - [ ] If `Ctrl+Space` does not show `LSP hover: loading`, try `F1` because some OS/terminal setups intercept `Ctrl+Space`.
 - [ ] Hover text appears in the LSP sidebar after the loading state when the terminal is wide enough.
 - [ ] In a narrow terminal, hover falls back to compact one-line status text.
@@ -101,6 +119,7 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Editing clears the hover message and still sends diagnostics updates.
 - [ ] Diagnostics remain visible in the sidebar after hover text is cleared.
 - [ ] Setting `TEXT_EDITOR_JS_LSP` to a missing command does not crash the editor when pressing `Ctrl+Space` or `F1`.
+- [ ] Setting `TEXT_EDITOR_TS_LSP` to a missing command does not crash the editor when pressing `Ctrl+Space` or `F1`.
 
 ## Rendering
 
