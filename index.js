@@ -120,18 +120,20 @@ function applyEditorState(state) {
   dirty = state.dirty;
 }
 
-function refreshSyntax() {
-  syntaxService.updateBuffer(activeBuffer().id, lines, filePath, version);
+function refreshSyntax(editEvent = null) {
+  syntaxService.updateBuffer(activeBuffer().id, lines, filePath, version, editEvent);
 }
 
-function markBufferChanged() {
+function markBufferChanged(oldLines = null) {
   clearHoverMessage();
+  const editEvent = oldLines ? documentModel.normalizedEditEvent(oldLines, lines) : null;
   documentModel.markChanged(activeBuffer());
   version = activeBuffer().version;
   dirty = activeBuffer().dirty;
   syncActiveBuffer();
-  clearTreeSearch();
-  refreshSyntax();
+  refreshSyntax(editEvent);
+  if (treeQuery) updateTreeMatches({ moveCursor: false });
+  else clearTreeSearch();
   void lspManager.changeBuffer(activeBuffer());
 }
 
@@ -186,23 +188,27 @@ function moveDown() {
 }
 
 function insertText(text) {
+  const oldLines = [...lines];
   applyEditorState(editorState.insertText(currentEditorState(), text));
-  markBufferChanged();
+  markBufferChanged(oldLines);
 }
 
 function insertNewline() {
+  const oldLines = [...lines];
   applyEditorState(editorState.insertNewline(currentEditorState()));
-  markBufferChanged();
+  markBufferChanged(oldLines);
 }
 
 function backspace() {
+  const oldLines = [...lines];
   applyEditorState(editorState.backspace(currentEditorState()));
-  markBufferChanged();
+  markBufferChanged(oldLines);
 }
 
 function deleteForward() {
+  const oldLines = [...lines];
   applyEditorState(editorState.deleteForward(currentEditorState()));
-  markBufferChanged();
+  markBufferChanged(oldLines);
 }
 
 function updateSearchMatches() {
@@ -215,9 +221,10 @@ function updateSearchMatches() {
 
 function replaceCurrent() {
   const state = currentEditorState();
+  const oldLines = [...lines];
   if (editorState.replaceCurrent(state, searchMatches, searchIndex, replaceQuery, replaceText)) {
     applyEditorState(state);
-    markBufferChanged();
+    markBufferChanged(oldLines);
     searchQuery = replaceQuery;
     updateSearchMatches();
   }
@@ -225,9 +232,10 @@ function replaceCurrent() {
 
 function replaceAll() {
   const state = currentEditorState();
+  const oldLines = [...lines];
   const changed = editorState.replaceAll(state, replaceQuery, replaceText);
   applyEditorState(state);
-  if (changed) markBufferChanged();
+  if (changed) markBufferChanged(oldLines);
   searchQuery = replaceQuery;
   updateSearchMatches();
 }
@@ -246,7 +254,7 @@ function findPrevious() {
   applyEditorState(editorState.moveToSearchMatch(currentEditorState(), searchMatches, searchIndex));
 }
 
-function updateTreeMatches() {
+function updateTreeMatches({ moveCursor = true } = {}) {
   treeMatches = [];
   treeSearchIndex = -1;
   treeSearchError = null;
@@ -256,9 +264,11 @@ function updateTreeMatches() {
   treeMatches = result.matches;
   if (!treeMatches.length) return;
   treeSearchIndex = 0;
-  clearHoverMessage();
-  cursorRow = treeMatches[0].row;
-  cursorCol = treeMatches[0].col;
+  if (moveCursor) {
+    clearHoverMessage();
+    cursorRow = treeMatches[0].row;
+    cursorCol = treeMatches[0].col;
+  }
 }
 
 function clearTreeSearch() {

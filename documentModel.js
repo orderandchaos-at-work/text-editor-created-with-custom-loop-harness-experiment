@@ -109,6 +109,105 @@ function documentChangeEvent(buffer, reason = 'change') {
   };
 }
 
+function byteLength(text) {
+  return Buffer.byteLength(text, 'utf8');
+}
+
+function positionToByteOffset(lines, row, col) {
+  const safeLines = normaliseLines(lines);
+  const safeRow = Math.max(0, Math.min(row, safeLines.length - 1));
+  const safeCol = Math.max(0, Math.min(col, safeLines[safeRow].length));
+  let offset = 0;
+  for (let index = 0; index < safeRow; index++) {
+    offset += byteLength(safeLines[index]) + 1;
+  }
+  return offset + byteLength(safeLines[safeRow].slice(0, safeCol));
+}
+
+function positionToPoint(lines, row, col) {
+  const safeLines = normaliseLines(lines);
+  const safeRow = Math.max(0, Math.min(row, safeLines.length - 1));
+  const safeCol = Math.max(0, Math.min(col, safeLines[safeRow].length));
+  return {
+    row: safeRow,
+    column: byteLength(safeLines[safeRow].slice(0, safeCol)),
+  };
+}
+
+function byteOffsetToPosition(lines, byteOffset) {
+  const safeLines = normaliseLines(lines);
+  let remaining = Math.max(0, byteOffset);
+  for (let row = 0; row < safeLines.length; row++) {
+    const lineBytes = byteLength(safeLines[row]);
+    if (remaining <= lineBytes) {
+      let bytes = 0;
+      for (let col = 0; col < safeLines[row].length;) {
+        const char = Array.from(safeLines[row].slice(col))[0];
+        const nextBytes = bytes + byteLength(char);
+        if (nextBytes > remaining) return { row, col };
+        bytes = nextBytes;
+        col += char.length;
+        if (bytes === remaining) return { row, col };
+      }
+      return { row, col: safeLines[row].length };
+    }
+    remaining -= lineBytes + 1;
+  }
+  const lastRow = safeLines.length - 1;
+  return { row: lastRow, col: safeLines[lastRow].length };
+}
+
+function offsetToByteOffset(lines, offset) {
+  return byteLength(linesToText(lines).slice(0, Math.max(0, offset)));
+}
+
+function normalizedEditEvent(oldLines, newLines) {
+  const oldText = linesToText(oldLines);
+  const newText = linesToText(newLines);
+  if (oldText === newText) return null;
+  let startOffset = 0;
+  while (startOffset < oldText.length && startOffset < newText.length && oldText[startOffset] === newText[startOffset]) {
+    startOffset++;
+  }
+  let unchangedSuffix = 0;
+  while (
+    unchangedSuffix < oldText.length - startOffset &&
+    unchangedSuffix < newText.length - startOffset &&
+    oldText[oldText.length - 1 - unchangedSuffix] === newText[newText.length - 1 - unchangedSuffix]
+  ) {
+    unchangedSuffix++;
+  }
+  const oldEndOffset = oldText.length - unchangedSuffix;
+  const newEndOffset = newText.length - unchangedSuffix;
+  const start = offsetToPosition(oldLines, startOffset);
+  const oldEnd = offsetToPosition(oldLines, oldEndOffset);
+  const newStart = offsetToPosition(newLines, startOffset);
+  const newEnd = offsetToPosition(newLines, newEndOffset);
+  const startIndex = offsetToByteOffset(oldLines, startOffset);
+  const oldEndIndex = offsetToByteOffset(oldLines, oldEndOffset);
+  const newEndIndex = offsetToByteOffset(newLines, newEndOffset);
+  const edit = {
+    oldRange: { start, end: oldEnd, startOffset, endOffset: oldEndOffset, startByte: startIndex, endByte: oldEndIndex },
+    newRange: { start: newStart, end: newEnd, startOffset, endOffset: newEndOffset, startByte: startIndex, endByte: newEndIndex },
+    replacementText: newText.slice(startOffset, newEndOffset),
+    startIndex,
+    oldEndIndex,
+    newEndIndex,
+    startPosition: positionToPoint(oldLines, start.row, start.col),
+    oldEndPosition: positionToPoint(oldLines, oldEnd.row, oldEnd.col),
+    newEndPosition: positionToPoint(newLines, newEnd.row, newEnd.col),
+  };
+  edit.treeEdit = {
+    startIndex: edit.startIndex,
+    oldEndIndex: edit.oldEndIndex,
+    newEndIndex: edit.newEndIndex,
+    startPosition: edit.startPosition,
+    oldEndPosition: edit.oldEndPosition,
+    newEndPosition: edit.newEndPosition,
+  };
+  return edit;
+}
+
 function documentOpenEvent(buffer) {
   return {
     type: 'documentOpen',
@@ -180,4 +279,8 @@ module.exports = {
   documentPositionParams,
   positionToOffset,
   offsetToPosition,
+  positionToByteOffset,
+  positionToPoint,
+  byteOffsetToPosition,
+  normalizedEditEvent,
 };

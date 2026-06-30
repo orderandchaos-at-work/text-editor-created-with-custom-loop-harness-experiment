@@ -4,7 +4,7 @@
 
 The editor is a CommonJS Node.js terminal app. `index.js` still owns terminal input, rendering, buffers, prompts, and the current integration points, but pure editing/search behavior has started moving into helper modules. Text is stored as `lines: string[]`, which maps well to Tree-sitter parsing and LSP line/character positions.
 
-The document model has been extracted so parsing and language services can consume normalized buffer state instead of terminal key handling. Incremental parsing should still wait until edit events carry reliable old/new ranges and replacement text.
+The document model has been extracted so parsing and language services can consume normalized buffer state instead of terminal key handling. Tree-sitter incremental parsing now consumes document-model edit events carrying reliable old/new ranges and replacement text.
 
 ## Current implementation status
 
@@ -14,15 +14,15 @@ Implemented:
 
 - `tree-sitter` and `tree-sitter-javascript` are declared in `package.json` and installed in the workspace.
 - `syntaxService.js` detects JavaScript-like files, converts editor lines to parser text, parses JavaScript buffers, collects syntax errors, builds highlight spans, and runs Tree-sitter query searches.
-- `syntaxService.js` maintains cached per-buffer syntax state containing language, parser, tree, version, errors, highlights, and query matches.
-- Supported buffers are parsed when opened/created and reparsed after edits using full-buffer reparse.
+- `syntaxService.js` maintains cached per-buffer syntax state containing language, parser, tree, version, errors, highlights, and query matches, and calls `tree.edit(...)` plus `parser.parse(newText, oldTree)` when normalized edit ranges are available.
+- Supported buffers are parsed when opened/created and incrementally reparsed after edits using normalized document-model edit ranges.
 - `index.js` renders cached Tree-sitter highlight spans, shows `AST ok` or an AST error count in the status row, and exposes tree query search with `Ctrl+T`.
 - Rendering consumes cached syntax state instead of parsing during render.
 - Tree query matches can be navigated with `Ctrl+G` and `Ctrl+Shift+G`.
 - `Ctrl+T` accepts raw Tree-sitter queries and friendly presets such as `functions`, `classes`, `imports`, `calls`, `calls:<name>`, `variables`, and `syntax-errors`.
 - JavaScript syntax highlighting covers representative imports/exports, declarations, calls, classes, properties, strings, template strings, regex literals, numbers, comments, constants, builtin variables, and safe operators.
 - Multi-buffer state coverage verifies cursor, dirty state, save behavior, and syntax cache isolation.
-- `documentModel.js` owns buffer/document helpers, text snapshots, position/offset conversion, versioning, dirty state, and normalized document open/change/save events.
+- `documentModel.js` owns buffer/document helpers, text snapshots, position/offset/byte/point conversion, versioning, dirty state, normalized document open/change/save events, and normalized edit ranges for Tree-sitter.
 - JavaScript LSP process management uses `typescript-language-server --stdio` by default, with environment overrides and opt-out support.
 - LSP full-document sync sends `didOpen`, `didChange`, `didSave`, and best-effort shutdown for configured JavaScript buffers.
 - LSP diagnostics are rendered in the sidebar for wide terminals with a narrow-terminal status row fallback.
@@ -46,7 +46,7 @@ Add three separate layers:
    - Uses Tree-sitter for parsing.
    - Maintains parser/tree state per supported buffer.
    - Provides highlight spans, syntax errors, symbols, and structural query results.
-   - Currently uses full-buffer reparse; later it can use incremental edits once document edit events exist.
+   - Uses incremental edits when document edit events exist, with full parse fallback for unsupported or unavailable state.
 
 3. `lspClient.js`
    - Starts language server processes per language.
@@ -69,17 +69,15 @@ Current JavaScript path:
 1. Detect language from file extension, initially `.js`, `.jsx`, `.mjs`, `.cjs`.
 2. Create a Tree-sitter parser for JavaScript.
 3. Parse supported buffers on open/create.
-4. Reparse supported buffers after edits using full-buffer reparse.
+4. Reparse supported buffers after edits using normalized edit ranges and old-tree incremental reparse.
 5. Run highlight queries to produce ranges with capture names like `keyword`, `function`, `method`, `class`, `property`, `string`, `number`, `comment`, `constant`, `builtin`, and `operator`.
 6. Map capture names to ANSI styles and apply highlighting during line rendering.
 
-Later optimization:
+Incremental reparse path:
 
 - Add normalized edit events through the document model.
 - Call `tree.edit(...)` with byte offsets and row/column points.
 - Reparse with `parser.parse(newText, oldTree)`.
-
-Do not do incremental parsing before the document model exists.
 
 ## Tree search
 
@@ -166,6 +164,7 @@ Completed since the original next list:
 3. Add LSP process management and full-document sync.
 4. Render LSP diagnostics.
 5. Add hover.
+6. Add normalized edit ranges and Tree-sitter incremental reparsing.
 
 Next:
 
@@ -173,13 +172,12 @@ Next:
 2. Add go-to-definition for cross-file targets.
 3. Add jump-back history.
 4. Improve diagnostics with gutter markers.
-5. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
-6. Design completion UI.
-7. Implement completion.
-8. Add references.
-9. Add rename.
-10. Add formatting.
-11. Add more grammars and configurable language-server commands.
+5. Design completion UI.
+6. Implement completion.
+7. Add references.
+8. Add rename.
+9. Add formatting.
+10. Add more grammars and configurable language-server commands.
 
 ## Testing strategy
 
@@ -187,8 +185,6 @@ Automated tests currently cover the Tree-sitter baseline and extracted search/re
 
 Next automated tests:
 
-- search/tree matches not bleeding between buffers
-- normalized edit event generation
 - go-to-definition request/response normalization with fake LSP clients
 - completion request/response normalization and UI state transitions
 

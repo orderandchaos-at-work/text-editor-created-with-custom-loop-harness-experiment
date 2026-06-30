@@ -213,6 +213,65 @@ describe('syntax service', () => {
     expect(syntaxService.getBufferState('changing-buffer')).toBe(second);
   });
 
+  testWithTreeSitter('incrementally updates syntax state after single-line edits', () => {
+    const firstLines = ['const value = 1;', 'value;'];
+    const secondLines = ['const value = ;', 'value;'];
+    const first = syntaxService.updateBuffer('incremental-single-buffer', firstLines, '/tmp/example.js', 1);
+    const edit = documentModel.normalizedEditEvent(firstLines, secondLines);
+    const second = syntaxService.updateBuffer('incremental-single-buffer', secondLines, '/tmp/example.js', 2, edit);
+
+    expect(first.errors).toEqual([]);
+    expect(second.errors.length).toBeGreaterThan(0);
+    expect(second.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'constant', text: 'value' }),
+    ]));
+  });
+
+  testWithTreeSitter('incrementally updates syntax state after non-ASCII text', () => {
+    const firstLines = ['const label = "🙂界e\u0301"; function broken( {'];
+    const secondLines = ['const label = "🙂界e\u0301"; function fixed() {}'];
+    const first = syntaxService.updateBuffer('incremental-nonascii-buffer', firstLines, '/tmp/example.js', 1);
+    const edit = documentModel.normalizedEditEvent(firstLines, secondLines);
+    const state = syntaxService.updateBuffer('incremental-nonascii-buffer', secondLines, '/tmp/example.js', 2, edit);
+
+    expect(first.errors.length).toBeGreaterThan(0);
+    expect(edit.startIndex).toBeGreaterThan(firstLines[0].indexOf('🙂'));
+    expect(state.errors).toEqual([]);
+    expect(state.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'function', text: 'fixed', row: 0, col: secondLines[0].indexOf('fixed') }),
+    ]));
+  });
+
+  testWithTreeSitter('incrementally updates syntax state after multi-line edits and tree queries', () => {
+    const firstLines = ['function answer() {', '  return 1;', '}'];
+    const secondLines = ['function answer() {', '  const value = 2;', '  return value;', '}'];
+    syntaxService.updateBuffer('incremental-multiline-buffer', firstLines, '/tmp/example.js', 1);
+    const edit = documentModel.normalizedEditEvent(firstLines, secondLines);
+    const state = syntaxService.updateBuffer('incremental-multiline-buffer', secondLines, '/tmp/example.js', 2, edit);
+    const variables = syntaxService.treeSearchBuffer('incremental-multiline-buffer', 'variables');
+
+    expect(state.errors).toEqual([]);
+    expect(state.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'constant', text: 'value', row: 1 }),
+    ]));
+    expect(variables.matches).toEqual([expect.objectContaining({ capture: 'variable.name', text: 'value', row: 1 })]);
+  });
+
+  testWithTreeSitter('incrementally updates syntax state after line splits and joins', () => {
+    const firstLines = ['const answer = 1;'];
+    const splitLines = ['const answer', ' = 1;'];
+    const joinedLines = ['const answer = 1;'];
+    syntaxService.updateBuffer('incremental-lines-buffer', firstLines, '/tmp/example.js', 1);
+    const split = syntaxService.updateBuffer('incremental-lines-buffer', splitLines, '/tmp/example.js', 2, documentModel.normalizedEditEvent(firstLines, splitLines));
+    const joined = syntaxService.updateBuffer('incremental-lines-buffer', joinedLines, '/tmp/example.js', 3, documentModel.normalizedEditEvent(splitLines, joinedLines));
+
+    expect(split.tree.rootNode.type).toBe('program');
+    expect(joined.errors).toEqual([]);
+    expect(joined.highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'constant', text: 'answer', row: 0 }),
+    ]));
+  });
+
   testWithTreeSitter('returns no syntax state for unsupported files', () => {
     const state = syntaxService.updateBuffer('text-buffer', ['plain text'], '/tmp/example.txt', 1);
 
@@ -434,6 +493,47 @@ describe('document model', () => {
     expect(documentModel.offsetToPosition(lines, 5)).toEqual({ row: 1, col: 1 });
     expect(documentModel.positionToOffset(lines, 99, 99)).toBe(8);
     expect(documentModel.offsetToPosition(lines, 99)).toEqual({ row: 2, col: 1 });
+  });
+
+  test('converts editor positions to Tree-sitter byte offsets and points', () => {
+    const lines = ['const icon = "🙂";', 'icon;'];
+    const colAfterEmoji = lines[0].indexOf('";');
+
+    expect(documentModel.positionToByteOffset(lines, 0, colAfterEmoji)).toBe(Buffer.byteLength(lines[0].slice(0, colAfterEmoji), 'utf8'));
+    expect(documentModel.positionToPoint(lines, 0, colAfterEmoji)).toEqual({ row: 0, column: Buffer.byteLength(lines[0].slice(0, colAfterEmoji), 'utf8') });
+    expect(documentModel.byteOffsetToPosition(lines, documentModel.positionToByteOffset(lines, 1, 2))).toEqual({ row: 1, col: 2 });
+  });
+
+  test('creates normalized edit events for single-line and multi-line edits', () => {
+    const singleLine = documentModel.normalizedEditEvent(['const x = 1;'], ['const answer = 1;']);
+    const multiLine = documentModel.normalizedEditEvent(['function x() {', '  return 1;', '}'], ['function x() {', '  const value = 1;', '  return value;', '}']);
+
+    expect(singleLine).toEqual(expect.objectContaining({
+      oldRange: expect.objectContaining({ start: { row: 0, col: 6 }, end: { row: 0, col: 7 } }),
+      newRange: expect.objectContaining({ start: { row: 0, col: 6 }, end: { row: 0, col: 12 } }),
+      replacementText: 'answer',
+      treeEdit: expect.objectContaining({ startIndex: 6, oldEndIndex: 7, newEndIndex: 12 }),
+    }));
+    expect(multiLine.oldRange).toEqual(expect.objectContaining({ start: { row: 1, col: 2 }, end: { row: 1, col: 10 } }));
+    expect(multiLine.newRange).toEqual(expect.objectContaining({ start: { row: 1, col: 2 }, end: { row: 2, col: 14 } }));
+    expect(multiLine.replacementText).toBe('const value = 1;\n  return value');
+    expect(multiLine.treeEdit.newEndPosition).toEqual({ row: 2, column: 14 });
+  });
+
+  test('creates normalized edit events for line splits and joins', () => {
+    const split = documentModel.normalizedEditEvent(['const answer = 1;'], ['const answer', ' = 1;']);
+    const join = documentModel.normalizedEditEvent(['const answer', ' = 1;'], ['const answer = 1;']);
+
+    expect(split).toEqual(expect.objectContaining({
+      oldRange: expect.objectContaining({ start: { row: 0, col: 12 }, end: { row: 0, col: 12 } }),
+      newRange: expect.objectContaining({ start: { row: 0, col: 12 }, end: { row: 1, col: 0 } }),
+      replacementText: '\n',
+    }));
+    expect(join).toEqual(expect.objectContaining({
+      oldRange: expect.objectContaining({ start: { row: 0, col: 12 }, end: { row: 1, col: 0 } }),
+      newRange: expect.objectContaining({ start: { row: 0, col: 12 }, end: { row: 0, col: 12 } }),
+      replacementText: '',
+    }));
   });
 
   test('creates normalized document events with full text changes', () => {
