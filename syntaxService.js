@@ -185,36 +185,64 @@ function walk(node, visit) {
   }
 }
 
-function collectSyntaxErrors(tree) {
+function byteColumnToIndex(line, byteColumn) {
+  let bytes = 0;
+  for (let index = 0; index < line.length;) {
+    if (bytes >= byteColumn) return index;
+    const char = Array.from(line.slice(index))[0];
+    const nextBytes = bytes + Buffer.byteLength(char, 'utf8');
+    if (nextBytes > byteColumn) return index;
+    bytes = nextBytes;
+    index += char.length;
+  }
+  return line.length;
+}
+
+function resolveStartColumn(line, column, text) {
+  const firstLineText = String(text || '').split('\n')[0];
+  if (column <= line.length && (!firstLineText || line.slice(column).startsWith(firstLineText))) return column;
+  return byteColumnToIndex(line, column);
+}
+
+function resolveEndColumn(line, column, start, text) {
+  const lineText = String(text || '').split('\n').pop();
+  if (column <= line.length && line.slice(start, column).endsWith(lineText)) return column;
+  return byteColumnToIndex(line, column);
+}
+
+function collectSyntaxErrors(tree, lines) {
   const errors = [];
   walk(tree.rootNode, node => {
     if (node.type === 'ERROR' || node.isError || node.isMissing) {
-      errors.push(nodeToRange(node, 'syntax.error'));
+      errors.push(nodeToRange(node, 'syntax.error', lines));
     }
   });
   return errors;
 }
 
-function nodeToRange(node, capture) {
+function nodeToRange(node, capture, lines) {
+  const startLine = lines && lines[node.startPosition.row] ? lines[node.startPosition.row] : '';
+  const endLine = lines && lines[node.endPosition.row] ? lines[node.endPosition.row] : '';
+  const col = lines ? resolveStartColumn(startLine, node.startPosition.column, node.text) : node.startPosition.column;
   return {
     capture,
     row: node.startPosition.row,
-    col: node.startPosition.column,
+    col,
     endRow: node.endPosition.row,
-    endCol: node.endPosition.column,
+    endCol: lines ? resolveEndColumn(endLine, node.endPosition.column, node.startPosition.row === node.endPosition.row ? col : 0, node.text) : node.endPosition.column,
     text: node.text,
     nodeType: node.type,
   };
 }
 
-function queryCaptures(language, tree, querySource) {
+function queryCaptures(language, tree, querySource, lines) {
   const query = new treeSitter.Query(language, querySource);
-  return query.captures(tree.rootNode).map(capture => nodeToRange(capture.node, capture.name));
+  return query.captures(tree.rootNode).map(capture => nodeToRange(capture.node, capture.name, lines));
 }
 
-function collectHighlights(language, tree, querySource = highlightQuery) {
+function collectHighlights(language, tree, querySource = highlightQuery, lines = null) {
   try {
-    return queryCaptures(language, tree, querySource);
+    return queryCaptures(language, tree, querySource, lines);
   } catch (_) {
     return [];
   }
@@ -248,7 +276,7 @@ function filterResolvedMatches(matches, resolved) {
 function highlight(lines, filePath) {
   const parsed = parse(lines, filePath);
   if (!parsed.tree) return [];
-  return collectHighlights(parsed.language, parsed.tree);
+  return collectHighlights(parsed.language, parsed.tree, highlightQuery, lines);
 }
 
 function parse(lines, filePath) {
@@ -266,8 +294,9 @@ function parse(lines, filePath) {
       tree: result.tree,
       language: result.language,
       version: 0,
-      errors: collectSyntaxErrors(result.tree),
-      highlights: collectHighlights(result.language, result.tree),
+      lines,
+      errors: collectSyntaxErrors(result.tree, lines),
+      highlights: collectHighlights(result.language, result.tree, highlightQuery, lines),
       queryMatches: [],
     };
   } catch (error) {
@@ -296,6 +325,7 @@ function emptySyntaxState(languageName, bufferId, version) {
     parser: null,
     tree: null,
     version,
+    lines: [],
     errors: [],
     highlights: [],
     queryMatches: [],
@@ -320,8 +350,9 @@ function updateBuffer(bufferId, lines, filePath, version) {
       parser: result.parser,
       tree: result.tree,
       version,
-      errors: collectSyntaxErrors(result.tree),
-      highlights: collectHighlights(result.language, result.tree),
+      lines,
+      errors: collectSyntaxErrors(result.tree, lines),
+      highlights: collectHighlights(result.language, result.tree, highlightQuery, lines),
       queryMatches: [],
     };
     bufferStates.set(bufferId, state);
@@ -354,7 +385,7 @@ function treeSearchBuffer(bufferId, querySource) {
     return { matches: [], error: resolved.error };
   }
   try {
-    state.queryMatches = filterResolvedMatches(queryCaptures(state.language, state.tree, resolved.querySource), resolved);
+    state.queryMatches = filterResolvedMatches(queryCaptures(state.language, state.tree, resolved.querySource, state.lines), resolved);
     return { matches: state.queryMatches, error: null, preset: resolved.preset };
   } catch (error) {
     state.queryMatches = [];
@@ -373,7 +404,7 @@ function treeSearch(lines, filePath, querySource) {
   }
   try {
     const result = parseJavaScript(lines);
-    return { matches: filterResolvedMatches(queryCaptures(result.language, result.tree, resolved.querySource), resolved), error: null, preset: resolved.preset };
+    return { matches: filterResolvedMatches(queryCaptures(result.language, result.tree, resolved.querySource, lines), resolved), error: null, preset: resolved.preset };
   } catch (error) {
     return { matches: [], error: error.message };
   }

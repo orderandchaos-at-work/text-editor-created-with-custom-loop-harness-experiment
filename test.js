@@ -8,6 +8,8 @@ const { createLspClient, encodeMessage, createMessageParser } = require('./lspCl
 const { createDiagnosticStore, severityLabel } = require('./lspDiagnostics');
 const { createLspManager, defaultLspConfigs, formatHoverContents } = require('./lspManager');
 const syntaxService = require('./syntaxService');
+const display = require('./displayWidth');
+const keybindings = require('./keybindings');
 const {
   createEditorState,
   clampCursor,
@@ -26,6 +28,8 @@ const {
   previousSearchIndex,
   replaceCurrent,
   replaceAll,
+  nextColumn,
+  previousColumn,
 } = require('./editorState');
 
 describe('editor core file helpers', () => {
@@ -65,6 +69,40 @@ describe('editor core file helpers', () => {
   test('save-as returns false for blank paths', () => {
     expect(resolveSaveAsPath('')).toBe(false);
     expect(saveAsFile('', ['content'])).toBe(false);
+  });
+});
+
+describe('display width helpers', () => {
+  test('measures narrow, wide, emoji, and combining characters', () => {
+    expect(display.textWidth('abc')).toBe(3);
+    expect(display.textWidth('界')).toBe(2);
+    expect(display.textWidth('🙂')).toBe(2);
+    expect(display.textWidth('e\u0301')).toBe(1);
+  });
+
+  test('slices and pads by terminal columns', () => {
+    expect(display.sliceByColumns('ab界cd', 2, 3)).toEqual({ text: '界c', start: 2, end: 4, width: 3 });
+    expect(display.truncate('ab界cd', 5)).toBe('ab界…');
+    expect(display.padRendered('界', 4)).toBe('界  ');
+  });
+
+  test('measures literal tabs as visible two-column text', () => {
+    expect(display.charWidth('\t')).toBe(2);
+    expect(display.textWidth('a\tb')).toBe(4);
+    expect(display.displayText('a\tb')).toBe('a  b');
+    expect(display.sliceByColumns('a\tb', 0, 3)).toEqual({ text: 'a\t', start: 0, end: 2, width: 3 });
+  });
+});
+
+describe('keybinding metadata', () => {
+  test('keeps documented controls and input matching in one metadata table', () => {
+    expect(keybindings.readmeRows()).toEqual(expect.arrayContaining([
+      ['Ctrl+S', 'Save current buffer'],
+      ['Ctrl+Space / F1', 'LSP hover for the current JavaScript symbol'],
+    ]));
+    expect(keybindings.matches('save', { ctrl: true, name: 's' })).toBe(true);
+    expect(keybindings.matches('hover', { name: 'f1' })).toBe(true);
+    expect(keybindings.helpLabel('previousMatch')).toBe('Ctrl+Shift+G');
   });
 });
 
@@ -128,6 +166,15 @@ describe('syntax service', () => {
       expect.objectContaining({ capture: 'comment', text: '// done' }),
       expect.objectContaining({ capture: 'constant', text: 'VALUE' }),
       expect.objectContaining({ capture: 'operator', text: '??' }),
+    ]));
+  });
+
+  testWithTreeSitter('converts syntax highlight byte columns after non-ASCII text', () => {
+    const line = 'const icon = "🙂"; const after = 1;';
+    const highlights = syntaxService.highlight([line], '/tmp/example.js');
+
+    expect(highlights).toEqual(expect.arrayContaining([
+      expect.objectContaining({ capture: 'constant', text: 'after', row: 0, col: line.indexOf('after'), endCol: line.indexOf('after') + 'after'.length }),
     ]));
   });
 
@@ -855,6 +902,45 @@ describe('editor state editing helpers', () => {
 
     expect(state.cursorRow).toBe(0);
     expect(state.cursorCol).toBe(3);
+  });
+
+  test('moves and deletes by Unicode code point boundaries', () => {
+    const state = createEditorState(['a🙂b']);
+
+    moveRight(state);
+    moveRight(state);
+
+    expect(state.cursorCol).toBe(3);
+    expect(previousColumn(state.lines[0], state.cursorCol)).toBe(1);
+    expect(nextColumn(state.lines[0], state.cursorCol)).toBe(4);
+
+    backspace(state);
+
+    expect(state.lines).toEqual(['ab']);
+    expect(state.cursorCol).toBe(1);
+
+    deleteForward(state);
+
+    expect(state.lines).toEqual(['a']);
+  });
+
+  test('moves and deletes by combining-mark grapheme boundaries', () => {
+    const state = createEditorState(['e\u0301x']);
+
+    moveRight(state);
+
+    expect(state.cursorCol).toBe(2);
+    expect(previousColumn(state.lines[0], state.cursorCol)).toBe(0);
+    expect(nextColumn(state.lines[0], 0)).toBe(2);
+
+    backspace(state);
+
+    expect(state.lines).toEqual(['x']);
+    expect(state.cursorCol).toBe(0);
+
+    deleteForward(state);
+
+    expect(state.lines).toEqual(['']);
   });
 
   test('keeps cursor within shorter lines when moving vertically', () => {

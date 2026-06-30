@@ -30,6 +30,7 @@ function createBuffer(id, filePath = null, lines = ['']) {
     cursorRow: 0,
     cursorCol: 0,
     viewportRow: 0,
+    viewportCol: 0,
     dirty: false,
     version: 0,
   };
