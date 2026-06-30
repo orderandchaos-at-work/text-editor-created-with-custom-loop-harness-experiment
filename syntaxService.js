@@ -2,6 +2,7 @@ const path = require('path');
 const documentModel = require('./documentModel');
 
 const javascriptExtensions = new Set(['.js', '.jsx', '.mjs', '.cjs']);
+const typescriptExtensions = new Set(['.ts', '.tsx']);
 
 const highlightQuery = `
 (identifier) @variable
@@ -121,6 +122,13 @@ const highlightQuery = `
 (ERROR) @error
 `;
 
+const typescriptHighlightQuery = `${highlightQuery}
+(type_identifier) @type
+(predefined_type) @type
+(interface_declaration name: (type_identifier) @constructor)
+(type_alias_declaration name: (type_identifier) @type)
+`;
+
 const astSearchPresets = {
   functions: `[
     (function_declaration name: (identifier) @function.name)
@@ -140,22 +148,58 @@ const astSearchPresets = {
   'syntax-errors': `(ERROR) @syntax.error`,
 };
 
+const typescriptAstSearchPresets = {
+  ...astSearchPresets,
+  interfaces: `(interface_declaration name: (type_identifier) @interface.name)`,
+  types: `(type_alias_declaration name: (type_identifier) @type.name)`,
+};
+
 let treeSitter;
-let javascriptLanguage;
+const loadedLanguages = new Map();
 const bufferStates = new Map();
 
 function loadTreeSitter() {
-  if (treeSitter && javascriptLanguage) {
-    return { Parser: treeSitter, language: javascriptLanguage };
+  if (!treeSitter) treeSitter = require('tree-sitter');
+  return treeSitter;
+}
+
+function languageDefinition(languageName) {
+  if (languageName === 'javascript') {
+    return { packageName: 'tree-sitter-javascript', exportName: null, highlightQuery, astSearchPresets };
   }
-  treeSitter = require('tree-sitter');
-  javascriptLanguage = require('tree-sitter-javascript');
-  return { Parser: treeSitter, language: javascriptLanguage };
+  if (languageName === 'typescript') {
+    return { packageName: 'tree-sitter-typescript', exportName: 'typescript', highlightQuery: typescriptHighlightQuery, astSearchPresets: typescriptAstSearchPresets };
+  }
+  if (languageName === 'tsx') {
+    return { packageName: 'tree-sitter-typescript', exportName: 'tsx', highlightQuery: typescriptHighlightQuery, astSearchPresets: typescriptAstSearchPresets };
+  }
+  return null;
+}
+
+function loadLanguage(languageName) {
+  const Parser = loadTreeSitter();
+  if (loadedLanguages.has(languageName)) return { Parser, language: loadedLanguages.get(languageName) };
+  const definition = languageDefinition(languageName);
+  if (!definition) throw new Error(`Unsupported language: ${languageName}`);
+  const grammar = require(definition.packageName);
+  const language = definition.exportName ? grammar[definition.exportName] : grammar.language || grammar;
+  if (!language) throw new Error(`Missing Tree-sitter grammar export: ${definition.exportName || definition.packageName}`);
+  loadedLanguages.set(languageName, language);
+  return { Parser, language };
 }
 
 function isTreeSitterAvailable() {
   try {
-    loadTreeSitter();
+    loadLanguage('javascript');
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function isLanguageAvailable(languageName) {
+  try {
+    loadLanguage(languageName);
     return true;
   } catch (_) {
     return false;
@@ -164,15 +208,18 @@ function isTreeSitterAvailable() {
 
 function detectLanguage(filePath) {
   if (!filePath) return null;
-  return javascriptExtensions.has(path.extname(filePath).toLowerCase()) ? 'javascript' : null;
+  const extension = path.extname(filePath).toLowerCase();
+  if (javascriptExtensions.has(extension)) return 'javascript';
+  if (typescriptExtensions.has(extension)) return extension === '.tsx' ? 'tsx' : 'typescript';
+  return null;
 }
 
 function linesToText(lines) {
   return documentModel.linesToText(lines);
 }
 
-function parseJavaScript(lines) {
-  const { Parser, language } = loadTreeSitter();
+function parseWithLanguage(lines, languageName) {
+  const { Parser, language } = loadLanguage(languageName);
   const parser = new Parser();
   parser.setLanguage(language);
   return { parser, tree: parser.parse(linesToText(lines)), language };
@@ -250,8 +297,14 @@ function collectHighlights(language, tree, querySource = highlightQuery, lines =
 
 function resolveAstSearchInput(input) {
   const trimmed = input.trim();
-  if (astSearchPresets[trimmed]) {
-    return { querySource: astSearchPresets[trimmed], preset: trimmed, error: null };
+  return resolveAstSearchInputForLanguage(trimmed, 'javascript');
+}
+
+function resolveAstSearchInputForLanguage(input, languageName) {
+  const trimmed = input.trim();
+  const presets = languageDefinition(languageName).astSearchPresets;
+  if (presets[trimmed]) {
+    return { querySource: presets[trimmed], preset: trimmed, error: null };
   }
   if (trimmed.startsWith('calls:')) {
     const name = trimmed.slice('calls:'.length).trim();
@@ -259,7 +312,7 @@ function resolveAstSearchInput(input) {
       return { querySource: null, preset: 'calls', error: 'Invalid AST preset: calls:<name> requires a name' };
     }
     return {
-      querySource: astSearchPresets.calls,
+      querySource: presets.calls,
       preset: 'calls',
       filter: { capture: 'call.name', text: name },
       error: null,
@@ -276,7 +329,7 @@ function filterResolvedMatches(matches, resolved) {
 function highlight(lines, filePath) {
   const parsed = parse(lines, filePath);
   if (!parsed.tree) return [];
-  return collectHighlights(parsed.language, parsed.tree, highlightQuery, lines);
+  return collectHighlights(parsed.language, parsed.tree, languageDefinition(parsed.languageName).highlightQuery, lines);
 }
 
 function parse(lines, filePath) {
@@ -285,7 +338,7 @@ function parse(lines, filePath) {
     return emptySyntaxState(null, null, 0);
   }
   try {
-    const result = parseJavaScript(lines);
+    const result = parseWithLanguage(lines, languageName);
     return {
       supported: true,
       available: true,
@@ -296,7 +349,7 @@ function parse(lines, filePath) {
       version: 0,
       lines,
       errors: collectSyntaxErrors(result.tree, lines),
-      highlights: collectHighlights(result.language, result.tree, highlightQuery, lines),
+      highlights: collectHighlights(result.language, result.tree, languageDefinition(languageName).highlightQuery, lines),
       queryMatches: [],
     };
   } catch (error) {
@@ -332,8 +385,8 @@ function emptySyntaxState(languageName, bufferId, version) {
   };
 }
 
-function incrementalParseJavaScript(state, lines, editEvent) {
-  if (!state || !state.available || !state.parser || !state.tree || !editEvent || !editEvent.treeEdit) return null;
+function incrementalParse(state, lines, languageName, editEvent) {
+  if (!state || state.languageName !== languageName || !state.available || !state.parser || !state.tree || !editEvent || !editEvent.treeEdit) return null;
   state.tree.edit(editEvent.treeEdit);
   return { parser: state.parser, tree: state.parser.parse(linesToText(lines), state.tree), language: state.language };
 }
@@ -347,7 +400,7 @@ function updateBuffer(bufferId, lines, filePath, version, editEvent = null) {
   }
   try {
     const previousState = bufferStates.get(bufferId);
-    const result = incrementalParseJavaScript(previousState, lines, editEvent) || parseJavaScript(lines);
+    const result = incrementalParse(previousState, lines, languageName, editEvent) || parseWithLanguage(lines, languageName);
     const state = {
       bufferId,
       supported: true,
@@ -359,7 +412,7 @@ function updateBuffer(bufferId, lines, filePath, version, editEvent = null) {
       version,
       lines,
       errors: collectSyntaxErrors(result.tree, lines),
-      highlights: collectHighlights(result.language, result.tree, highlightQuery, lines),
+      highlights: collectHighlights(result.language, result.tree, languageDefinition(languageName).highlightQuery, lines),
       queryMatches: [],
     };
     bufferStates.set(bufferId, state);
@@ -386,7 +439,7 @@ function treeSearchBuffer(bufferId, querySource) {
   if (!state || !state.available || !querySource) {
     return { matches: [], error: null };
   }
-  const resolved = resolveAstSearchInput(querySource);
+  const resolved = resolveAstSearchInputForLanguage(querySource, state.languageName);
   if (resolved.error) {
     state.queryMatches = [];
     return { matches: [], error: resolved.error };
@@ -405,12 +458,12 @@ function treeSearch(lines, filePath, querySource) {
   if (!languageName || !querySource) {
     return { matches: [], error: null };
   }
-  const resolved = resolveAstSearchInput(querySource);
+  const resolved = resolveAstSearchInputForLanguage(querySource, languageName);
   if (resolved.error) {
     return { matches: [], error: resolved.error };
   }
   try {
-    const result = parseJavaScript(lines);
+    const result = parseWithLanguage(lines, languageName);
     return { matches: filterResolvedMatches(queryCaptures(result.language, result.tree, resolved.querySource, lines), resolved), error: null, preset: resolved.preset };
   } catch (error) {
     return { matches: [], error: error.message };
@@ -421,6 +474,7 @@ module.exports = {
   detectLanguage,
   linesToText,
   isTreeSitterAvailable,
+  isLanguageAvailable,
   parse,
   highlight,
   treeSearch,

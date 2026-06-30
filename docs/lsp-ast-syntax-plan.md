@@ -8,12 +8,12 @@ The document model has been extracted so parsing and language services can consu
 
 ## Current implementation status
 
-Tree-sitter-first JavaScript support and the initial JavaScript LSP diagnostics/hover path are implemented and verified.
+Tree-sitter-first JavaScript support and the initial JavaScript LSP diagnostics/hover path are implemented and verified. The next incremental language path is TypeScript/TSX because it shares the existing `typescript-language-server` LSP, has an available CommonJS-compatible Tree-sitter grammar, is small enough for the current dependency set, and can be tested with compact `.ts` and `.tsx` fixtures without changing the JavaScript path.
 
 Implemented:
 
-- `tree-sitter` and `tree-sitter-javascript` are declared in `package.json` and installed in the workspace.
-- `syntaxService.js` detects JavaScript-like files, converts editor lines to parser text, parses JavaScript buffers, collects syntax errors, builds highlight spans, and runs Tree-sitter query searches.
+- `tree-sitter`, `tree-sitter-javascript`, and `tree-sitter-typescript` are declared in `package.json`.
+- `syntaxService.js` detects JavaScript-like and TypeScript files, converts editor lines to parser text, parses supported buffers, collects syntax errors, builds highlight spans, and runs Tree-sitter query searches.
 - `syntaxService.js` maintains cached per-buffer syntax state containing language, parser, tree, version, errors, highlights, and query matches, and calls `tree.edit(...)` plus `parser.parse(newText, oldTree)` when normalized edit ranges are available.
 - Supported buffers are parsed when opened/created and incrementally reparsed after edits using normalized document-model edit ranges.
 - `index.js` renders cached Tree-sitter highlight spans, shows `AST ok` or an AST error count in the status row, and exposes tree query search with `Ctrl+T`.
@@ -21,10 +21,12 @@ Implemented:
 - Tree query matches can be navigated with `Ctrl+G` and `Ctrl+Shift+G`.
 - `Ctrl+T` accepts raw Tree-sitter queries and friendly presets such as `functions`, `classes`, `imports`, `calls`, `calls:<name>`, `variables`, and `syntax-errors`.
 - JavaScript syntax highlighting covers representative imports/exports, declarations, calls, classes, properties, strings, template strings, regex literals, numbers, comments, constants, builtin variables, and safe operators.
+- TypeScript/TSX syntax highlighting reuses the stable JavaScript coverage and adds captures for type identifiers, predefined types, interfaces, and type aliases.
 - Multi-buffer state coverage verifies cursor, dirty state, save behavior, and syntax cache isolation.
 - `documentModel.js` owns buffer/document helpers, text snapshots, position/offset/byte/point conversion, versioning, dirty state, normalized document open/change/save events, and normalized edit ranges for Tree-sitter.
 - JavaScript LSP process management uses `typescript-language-server --stdio` by default, with environment overrides and opt-out support.
-- LSP full-document sync sends `didOpen`, `didChange`, `didSave`, and best-effort shutdown for configured JavaScript buffers.
+- TypeScript and TSX LSP process management also defaults to `typescript-language-server --stdio`, with `TEXT_EDITOR_TS_LSP`, `TEXT_EDITOR_TS_LSP_ARGS`, and `TEXT_EDITOR_TS_LSP=0` override behavior.
+- LSP full-document sync sends `didOpen`, `didChange`, `didSave`, and best-effort shutdown for configured JavaScript, TypeScript, and TSX buffers.
 - LSP diagnostics are rendered in the sidebar for wide terminals with a narrow-terminal status row fallback.
 - LSP hover is available with `Ctrl+Space` and `F1`, has been verified against the real default language server through `npm start`, and renders in the LSP sidebar.
 - Jest tests cover language detection, line-to-text conversion, parsing, syntax errors, highlight captures, cached syntax state, raw queries, AST presets, and extracted search/replace helpers.
@@ -32,6 +34,13 @@ Implemented:
 Verification:
 
 - `npm test` passes with Tree-sitter, document model, and fake LSP coverage.
+
+Verified TypeScript dependency rationale:
+
+- `tree-sitter-typescript@0.23.2` exposes CommonJS grammar entry points through `bindings/node` and exports both `typescript` and `tsx` grammars.
+- The grammar package is larger than the JavaScript grammar but still acceptable for adding a single language path; the verified unpacked package size was about 38.8 MB.
+- TypeScript and TSX can reuse the existing `typescript-language-server --stdio` dev dependency instead of adding another LSP server.
+- The change keeps `.js`, `.jsx`, `.mjs`, and `.cjs` detection, highlighting, AST presets, and LSP configuration intact.
 
 ## Recommended architecture
 
@@ -63,11 +72,12 @@ Current dependencies:
 
 - `tree-sitter`
 - `tree-sitter-javascript`
+- `tree-sitter-typescript`
 
-Current JavaScript path:
+Current JavaScript and TypeScript path:
 
-1. Detect language from file extension, initially `.js`, `.jsx`, `.mjs`, `.cjs`.
-2. Create a Tree-sitter parser for JavaScript.
+1. Detect language from file extension: `.js`, `.jsx`, `.mjs`, `.cjs`, `.ts`, and `.tsx`.
+2. Create a Tree-sitter parser for JavaScript, TypeScript, or TSX.
 3. Parse supported buffers on open/create.
 4. Reparse supported buffers after edits using normalized edit ranges and old-tree incremental reparse.
 5. Run highlight queries to produce ranges with capture names like `keyword`, `function`, `method`, `class`, `property`, `string`, `number`, `comment`, `constant`, `builtin`, and `operator`.
@@ -101,6 +111,8 @@ Implemented presets:
 - `calls:<name>`
 - `variables`
 - `syntax-errors`
+- `interfaces` for TypeScript and TSX
+- `types` for TypeScript and TSX
 
 Example raw JavaScript queries:
 
@@ -168,16 +180,17 @@ Completed since the original next list:
 
 Next:
 
-1. Add go-to-definition for same-file jumps.
-2. Add go-to-definition for cross-file targets.
-3. Add jump-back history.
-4. Improve diagnostics with gutter markers.
-5. Design completion UI.
-6. Implement completion.
-7. Add references.
-8. Add rename.
-9. Add formatting.
-10. Add more grammars and configurable language-server commands.
+1. Run manual QA for TypeScript/TSX syntax and LSP behavior after `npm install` installs `tree-sitter-typescript`.
+2. Add go-to-definition for same-file jumps.
+3. Add go-to-definition for cross-file targets.
+4. Add jump-back history.
+5. Improve diagnostics with gutter markers.
+6. Design completion UI.
+7. Implement completion.
+8. Add references.
+9. Add rename.
+10. Add formatting.
+11. Add more grammars only after the JavaScript and TypeScript paths remain stable.
 
 ## Testing strategy
 
@@ -195,3 +208,4 @@ Keep manual QA for terminal rendering, keybindings, and interactive language-ser
 - Whether to keep using CommonJS or migrate to ESM before adding modern parser/LSP packages.
 - Whether to vendor highlight queries or keep local minimal queries.
 - How diagnostics and highlights should interact when ranges overlap.
+- Which non-TypeScript language should be next after JavaScript and TypeScript remain stable.
