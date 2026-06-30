@@ -1,3 +1,10 @@
 task_source:
   provider: local
+  url: http://localhost:8080
+  username: jsonrpc
+  token_file: .smolclaw/kanboard/api-token
   project: text-editor
+  eligible_statuses: [Backlog]
+  in_progress_status: Work in progress
+  review_status: Ready
+  required_label: agent-ready

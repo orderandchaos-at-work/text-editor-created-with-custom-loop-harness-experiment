@@ -1,0 +1,31 @@
+{
+  "job_id": "job-c636fa760110",
+  "mode": "run",
+  "command": [
+    "/Users/orderandchaos/code/ai/smolclaw/.venv314/bin/python3.14",
+    "-m",
+    "cli.main",
+    "work-loop",
+    "worker",
+    "--job-id",
+    "job-c636fa760110",
+    "--mode",
+    "run",
+    "--workspace",
+    "/Users/orderandchaos/code/text-editor",
+    "--config",
+    "/Users/orderandchaos/code/text-editor/.work-loop.yaml",
+    "--project",
+    "text-editor",
+    "--limit",
+    "3"
+  ],
+  "state": "failed",
+  "pid": 76994,
+  "pgid": 76994,
+  "started_at": 1782833566.500138,
+  "updated_at": 1782833568.715565,
+  "heartbeat_at": null,
+  "exit_code": 1,
+  "message": "Base repository has uncommitted changes; start from a clean base before work-loop runs."
+}

@@ -38,17 +38,37 @@ Verified behavior:
 - Hover text clears after cursor movement or edits.
 - Diagnostics remain visible in the LSP sidebar independently of hover text.
 
-## 1. Add go to definition
+## 1. Add go to definition: same-file jumps
 
 After hover is stable, add `textDocument/definition`.
 
-Recommended first scope:
+First scope:
 
-- Same-file jumps first.
-- Then open target files when a definition points to another URI.
-- Keep the current buffer/cursor history simple before adding jump-back support.
+- Request definitions for the active JavaScript buffer and cursor position.
+- Jump only when the returned location points to the current buffer URI.
+- Add fake LSP coverage for request/response normalization.
 
-## 2. Improve diagnostic display
+## 2. Add go to definition: cross-file targets
+
+After same-file jumps work, support target URIs outside the current buffer.
+
+Scope:
+
+- Open the target file when the definition points to another URI.
+- Move the cursor to the returned target range.
+- Handle missing or unreadable files without crashing.
+
+## 3. Add jump-back history
+
+Definition jumps should save the previous buffer and cursor position.
+
+Scope:
+
+- Store the previous location before a definition jump.
+- Add a keybinding to return to the previous location.
+- Keep the initial history as a simple stack.
+
+## 4. Improve diagnostic display
 
 Diagnostics currently appear in the LSP sidebar when space is available. Next UI improvements can be incremental:
 
@@ -56,7 +76,18 @@ Diagnostics currently appear in the LSP sidebar when space is available. Next UI
 - Keep inline underlines for later because they must merge with syntax, search, and tree-search decorations.
 - Preserve active-buffer diagnostic isolation.
 
-## 3. Add completion UI
+## 5. Add Tree-sitter incremental edit support
+
+The editor currently reparses supported buffers with full-buffer Tree-sitter parses.
+
+Scope:
+
+- Emit reliable normalized edit ranges from document-model edit paths.
+- Call `tree.edit(...)` before reparsing.
+- Reparse with the old tree.
+- Add tests for multi-line edits and range/offset conversion.
+
+## 6. Design completion UI
 
 Completion is more UI-heavy than hover or definition.
 
@@ -68,13 +99,48 @@ Before implementing it, decide how the terminal popup/list should work:
 - cancellation on movement/edit
 - display limits for small terminal windows
 
-## 4. Consider incremental sync later
+## 7. Implement completion
+
+After the UI behavior is decided, add LSP completion support.
+
+Scope:
+
+- Request `textDocument/completion` for the active JavaScript buffer and cursor position.
+- Render the completion list using the chosen terminal UI.
+- Insert the selected completion item safely.
+- Add fake LSP and UI-state tests.
+
+## 8. Add references
+
+Scope:
+
+- Request `textDocument/references` for the active JavaScript buffer and cursor position.
+- Present results in the sidebar or a quick list.
+- Support jumping between reference results.
+
+## 9. Add rename
+
+Scope:
+
+- Request `textDocument/rename` for the active JavaScript buffer and cursor position.
+- Preview and apply workspace edits safely.
+- Handle multi-file edits carefully.
+
+## 10. Add formatting
+
+Scope:
+
+- Request document or range formatting.
+- Apply returned text edits through the document model.
+- Preserve dirty-state and version tracking.
+
+## 11. Consider incremental LSP sync later
 
 The editor currently uses full-document LSP sync. Keep it that way until the document model owns normalized edit application more completely.
 
 Incremental sync should wait until edits flow through one model boundary that can emit reliable ranges and replacement text.
 
-## 5. Continue editor polish
+## 12. Continue editor polish
 
 Remaining non-LSP polish:
 

@@ -4,7 +4,7 @@
 
 The editor is a CommonJS Node.js terminal app. `index.js` still owns terminal input, rendering, buffers, prompts, and the current integration points, but pure editing/search behavior has started moving into helper modules. Text is stored as `lines: string[]`, which maps well to Tree-sitter parsing and LSP line/character positions.
 
-Before adding LSP or incremental parsing, extract a small document model so parsing and language services can subscribe to normalized document-change events instead of terminal key handling.
+The document model has been extracted so parsing and language services can consume normalized buffer state instead of terminal key handling. Incremental parsing should still wait until edit events carry reliable old/new ranges and replacement text.
 
 ## Current implementation status
 
@@ -50,8 +50,8 @@ Add three separate layers:
 
 3. `lspClient.js`
    - Starts language server processes per language.
-   - Sends `initialize`, `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, and `shutdown`.
-   - Receives diagnostics and later supports hover, completion, definition, rename, and formatting.
+   - Sends `initialize`, `initialized`, `textDocument/didOpen`, `textDocument/didChange`, `textDocument/didSave`, and `shutdown`.
+   - Receives diagnostics and supports hover; later work adds completion, definition, references, rename, and formatting.
 
 Rendering should consume decorations from the syntax and LSP layers rather than mixing parsing or protocol logic into the terminal renderer.
 
@@ -132,16 +132,16 @@ Suggested dependencies to verify before use:
 
 Do not use `vscode-languageclient` first. It is oriented around VS Code extension clients and is heavier than this project needs.
 
-Implementation outline:
+Completed implementation outline:
 
-1. Add an LSP client wrapper around `child_process.spawn` and `vscode-jsonrpc/node` stream readers/writers.
-2. Configure a server command per language. For JavaScript/TypeScript, this likely means a TypeScript language server wrapper such as `typescript-language-server --stdio`, but make it optional and user-configured rather than bundling it immediately.
-3. On editor start, initialize the server with workspace root and client capabilities.
+1. Add an LSP client wrapper around `child_process.spawn` with byte-accurate JSON-RPC framing.
+2. Configure JavaScript/TypeScript to use `typescript-language-server --stdio` by default, with environment overrides and opt-out support.
+3. On editor start, initialize the server with workspace root and client capabilities, then send `initialized`.
 4. On buffer open, send `textDocument/didOpen` with URI, language ID, version, and text.
-5. On edit, increment the buffer version and send `textDocument/didChange`. Start with full-document sync for simplicity.
+5. On edit, increment the buffer version and send full-document `textDocument/didChange` for simplicity.
 6. On save, send `textDocument/didSave`.
-7. Render diagnostics as gutter markers or a status-line message for the current line.
-8. Add hover/completion/definition only after diagnostics are reliable.
+7. Render diagnostics in the LSP sidebar for wide terminals, with a status-row fallback for narrow terminals.
+8. Add hover after diagnostics, rendering hover text in the LSP sidebar.
 
 ## Decision
 
@@ -169,13 +169,17 @@ Completed since the original next list:
 
 Next:
 
-1. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
-2. Add go-to-definition.
-3. Add completion.
-4. Add references.
-5. Add rename.
-6. Add formatting.
-7. Add more grammars and configurable language-server commands.
+1. Add go-to-definition for same-file jumps.
+2. Add go-to-definition for cross-file targets.
+3. Add jump-back history.
+4. Improve diagnostics with gutter markers.
+5. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
+6. Design completion UI.
+7. Implement completion.
+8. Add references.
+9. Add rename.
+10. Add formatting.
+11. Add more grammars and configurable language-server commands.
 
 ## Testing strategy
 
