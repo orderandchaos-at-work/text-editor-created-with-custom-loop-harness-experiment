@@ -1,4 +1,0 @@
-adapters:
-  task_source:
-    default:
-      provider: local
