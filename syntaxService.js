@@ -122,11 +122,62 @@ const highlightQuery = `
 (ERROR) @error
 `;
 
-const typescriptHighlightQuery = `${highlightQuery}
+const typescriptHighlightQuery = `
+(identifier) @variable
+(property_identifier) @property
+(function_declaration name: (identifier) @function)
+(method_definition name: (property_identifier) @function.method)
+(call_expression function: (identifier) @function.call)
+(call_expression function: (member_expression property: (property_identifier) @function.method))
+(class_declaration name: (type_identifier) @constructor)
 (type_identifier) @type
 (predefined_type) @type
 (interface_declaration name: (type_identifier) @constructor)
 (type_alias_declaration name: (type_identifier) @type)
+[
+  "abstract"
+  "as"
+  "async"
+  "await"
+  "class"
+  "const"
+  "declare"
+  "enum"
+  "export"
+  "extends"
+  "from"
+  "function"
+  "get"
+  "if"
+  "implements"
+  "import"
+  "in"
+  "interface"
+  "keyof"
+  "let"
+  "namespace"
+  "new"
+  "of"
+  "override"
+  "private"
+  "protected"
+  "public"
+  "readonly"
+  "return"
+  "satisfies"
+  "set"
+  "static"
+  "type"
+  "typeof"
+  "var"
+  "void"
+  "while"
+  "yield"
+] @keyword
+(comment) @comment
+(string) @string
+(number) @number
+(ERROR) @error
 `;
 
 const astSearchPresets = {
