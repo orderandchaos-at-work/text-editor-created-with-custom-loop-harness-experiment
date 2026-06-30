@@ -14,7 +14,7 @@ const keybindings = [
   { id: 'previousMatch', keys: ['Ctrl+Shift+G'], action: 'Previous search match', helpAction: 'prev', match: key => key.ctrl && key.name === 'g' && key.shift },
   { id: 'replace', keys: ['Ctrl+R'], action: 'Replace; in replace mode, replace all after entering replacement text', helpAction: 'Replace', match: key => key.ctrl && key.name === 'r' },
   { id: 'tree', keys: ['Ctrl+T'], action: 'Tree-sitter query search for supported files', helpAction: 'Tree', match: key => key.ctrl && key.name === 't' },
-  { id: 'hover', keys: ['Ctrl+Space / F1'], action: 'LSP hover for the current JavaScript symbol', helpAction: 'Hover', match: key => key.name === 'f1' || (key.ctrl && key.name === 'space') || key.sequence === '\u0000' },
+  { id: 'hover', keys: ['Ctrl+Space / F1'], action: 'LSP hover for the current supported-language symbol', helpAction: 'Hover', match: key => key.name === 'f1' || (key.ctrl && key.name === 'space') || key.sequence === '\u0000' },
   { id: 'quit', keys: ['Ctrl+Q'], action: 'Quit, with confirmation if buffers are modified', helpAction: 'Quit', match: key => key.ctrl && key.name === 'q' },
   { id: 'forceQuit', keys: ['Ctrl+C'], action: 'Force quit', match: key => key.ctrl && key.name === 'c' },
   { id: 'cancel', keys: ['Esc'], action: 'Cancel active prompt', helpAction: 'cancel' },

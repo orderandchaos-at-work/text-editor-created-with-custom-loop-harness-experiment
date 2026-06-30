@@ -8,6 +8,8 @@ function languageIdForFilePath(filePath) {
   if (!filePath) return 'plaintext';
   const extension = path.extname(filePath).toLowerCase();
   if (extension === '.js' || extension === '.jsx' || extension === '.mjs' || extension === '.cjs') return 'javascript';
+  if (extension === '.ts') return 'typescript';
+  if (extension === '.tsx') return 'typescriptreact';
   return 'plaintext';
 }
 

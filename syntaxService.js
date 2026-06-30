@@ -182,7 +182,7 @@ function loadLanguage(languageName) {
   const definition = languageDefinition(languageName);
   if (!definition) throw new Error(`Unsupported language: ${languageName}`);
   const grammar = require(definition.packageName);
-  const language = definition.exportName ? grammar[definition.exportName] : grammar.language || grammar;
+  const language = definition.exportName ? grammar[definition.exportName] : grammar;
   if (!language) throw new Error(`Missing Tree-sitter grammar export: ${definition.exportName || definition.packageName}`);
   loadedLanguages.set(languageName, language);
   return { Parser, language };
