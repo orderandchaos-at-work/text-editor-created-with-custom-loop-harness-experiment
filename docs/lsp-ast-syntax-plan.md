@@ -14,13 +14,8 @@ Implemented:
 
 - `tree-sitter`, `tree-sitter-javascript`, and `tree-sitter-typescript` are declared in `package.json`.
 - `syntaxService.js` detects JavaScript-like and TypeScript files, converts editor lines to parser text, parses supported buffers, collects syntax errors, builds highlight spans, and runs Tree-sitter query searches.
-<<<<<<< HEAD
 - `syntaxService.js` maintains cached per-buffer syntax state containing language, parser, tree, version, errors, highlights, and query matches, and calls `tree.edit(...)` plus `parser.parse(newText, oldTree)` when normalized edit ranges are available.
-- Supported buffers are parsed when opened/created and incrementally reparsed after edits using normalized document-model edit ranges.
-=======
-- `syntaxService.js` maintains cached per-buffer syntax state containing language, parser, tree, version, errors, highlights, and query matches.
-- Supported buffers are parsed when opened/created and reparsed after edits using full-buffer reparse.
->>>>>>> f04bcd22619f7c217b61fba9ab760918343c7555
+- Supported buffers are parsed when opened/created and incrementally reparsed after edits using normalized document-model edit ranges, with full-buffer parse fallback when incremental state is unavailable.
 - `index.js` renders cached Tree-sitter highlight spans, shows `AST ok` or an AST error count in the status row, and exposes tree query search with `Ctrl+T`.
 - Rendering consumes cached syntax state instead of parsing during render.
 - Tree query matches can be navigated with `Ctrl+G` and `Ctrl+Shift+G`.
@@ -190,22 +185,12 @@ Next:
 3. Add go-to-definition for cross-file targets.
 4. Add jump-back history.
 5. Improve diagnostics with gutter markers.
-<<<<<<< HEAD
 6. Design completion UI.
 7. Implement completion.
 8. Add references.
 9. Add rename.
 10. Add formatting.
 11. Add more grammars only after the JavaScript and TypeScript paths remain stable.
-=======
-6. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
-7. Design completion UI.
-8. Implement completion.
-9. Add references.
-10. Add rename.
-11. Add formatting.
-12. Add more grammars only after the JavaScript and TypeScript paths remain stable.
->>>>>>> f04bcd22619f7c217b61fba9ab760918343c7555
 
 ## Testing strategy
 

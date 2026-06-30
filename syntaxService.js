@@ -399,12 +399,8 @@ function updateBuffer(bufferId, lines, filePath, version, editEvent = null) {
     return state;
   }
   try {
-<<<<<<< HEAD
     const previousState = bufferStates.get(bufferId);
     const result = incrementalParse(previousState, lines, languageName, editEvent) || parseWithLanguage(lines, languageName);
-=======
-    const result = parseWithLanguage(lines, languageName);
->>>>>>> f04bcd22619f7c217b61fba9ab760918343c7555
     const state = {
       bufferId,
       supported: true,
