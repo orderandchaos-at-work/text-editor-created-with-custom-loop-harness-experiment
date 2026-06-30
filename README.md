@@ -58,6 +58,7 @@ LSP tests use fake transports and fake clients. They do not require a real JavaS
 | Ctrl+Shift+G | Previous search match |
 | Ctrl+R | Replace; in replace mode, replace all after entering replacement text |
 | Ctrl+T | Tree-sitter query search for supported files |
+| Ctrl+Space / F1 | LSP hover for the current JavaScript symbol |
 | Ctrl+Q | Quit, with confirmation if buffers are modified |
 | Ctrl+C | Force quit |
 | Esc | Cancel active prompt |
@@ -93,14 +94,20 @@ Example tree query:
 (function_declaration name: (identifier) @function.name)
 ```
 
-## Optional JavaScript LSP diagnostics
+## JavaScript LSP diagnostics
 
-JavaScript LSP diagnostics are optional. Without LSP environment variables, the editor starts and behaves normally.
+JavaScript LSP diagnostics use `typescript-language-server --stdio` by default. The server is included as a dev dependency, so `npm install` makes hover and diagnostics available when running through `npm start`.
 
-To enable JavaScript diagnostics, point the editor at an external language server command:
+To override the language server command, set:
 
 ```bash
-TEXT_EDITOR_JS_LSP=typescript-language-server TEXT_EDITOR_JS_LSP_ARGS="--stdio" npm start -- src/example.js
+TEXT_EDITOR_JS_LSP=custom-language-server TEXT_EDITOR_JS_LSP_ARGS="--stdio" npm start -- src/example.js
+```
+
+To disable JavaScript LSP, set:
+
+```bash
+TEXT_EDITOR_JS_LSP=0 npm start -- src/example.js
 ```
 
 The editor sends full-document LSP sync events for JavaScript-like files (`.js`, `.jsx`, `.mjs`, `.cjs`):
@@ -111,7 +118,13 @@ The editor sends full-document LSP sync events for JavaScript-like files (`.js`,
 - save-as opens the new URI and sends `didSave`
 - `textDocument/publishDiagnostics` notifications are stored per buffer URI
 
-Diagnostics for the active buffer appear in the status row. When the cursor is on a line with diagnostics, the first diagnostic for that line is shown; otherwise the status row shows the active buffer diagnostic count.
+Diagnostics for the active buffer appear in the LSP sidebar when the terminal is wide enough. In narrow terminals, they fall back to the status row. The sidebar shows server status, hover text, and a short diagnostics preview for the active buffer.
+
+## JavaScript LSP hover
+
+Press `Ctrl+Space` to request `textDocument/hover` for the active buffer URI and current cursor position. `F1` also requests hover as a fallback for terminals or OS shortcuts that do not pass `Ctrl+Space` through.
+
+Hover requests first show `LSP hover: loading` in the LSP sidebar, then replace it with hover text or an actionable fallback such as `LSP hover: not enabled`, `LSP hover: server unavailable (...)`, or `LSP hover: unavailable at cursor`. Disabled LSP config, a missing server command, request failures, or empty hover responses do not crash the editor. Moving the cursor or editing clears the hover message. In narrow terminals without room for the sidebar, hover falls back to the status row.
 
 ## Save behavior
 

@@ -7,24 +7,24 @@ function encodeMessage(message) {
 }
 
 function createMessageParser(onMessage) {
-  let buffer = '';
+  let buffer = Buffer.alloc(0);
   return chunk => {
-    buffer += chunk.toString();
+    buffer = Buffer.concat([buffer, Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)]);
     while (true) {
       const headerEnd = buffer.indexOf('\r\n\r\n');
       if (headerEnd === -1) return;
-      const header = buffer.slice(0, headerEnd);
+      const header = buffer.subarray(0, headerEnd).toString('ascii');
       const match = header.match(/Content-Length: (\d+)/i);
       if (!match) {
-        buffer = buffer.slice(headerEnd + 4);
+        buffer = buffer.subarray(headerEnd + 4);
         continue;
       }
       const length = Number(match[1]);
       const bodyStart = headerEnd + 4;
       const bodyEnd = bodyStart + length;
       if (buffer.length < bodyEnd) return;
-      const body = buffer.slice(bodyStart, bodyEnd);
-      buffer = buffer.slice(bodyEnd);
+      const body = buffer.subarray(bodyStart, bodyEnd).toString('utf8');
+      buffer = buffer.subarray(bodyEnd);
       onMessage(JSON.parse(body));
     }
   };
@@ -117,6 +117,10 @@ function createLspClient(options = {}) {
     });
   }
 
+  function initialized(params = {}) {
+    notify('initialized', params);
+  }
+
   function didOpen(buffer) {
     const event = documentModel.documentOpenEvent(buffer);
     notify('textDocument/didOpen', {
@@ -150,6 +154,10 @@ function createLspClient(options = {}) {
     });
   }
 
+  function hover(params) {
+    return request('textDocument/hover', params);
+  }
+
   async function shutdown() {
     const result = await request('shutdown');
     notify('exit');
@@ -161,9 +169,11 @@ function createLspClient(options = {}) {
   return {
     start,
     initialize,
+    initialized,
     didOpen,
     didChange,
     didSave,
+    hover,
     shutdown,
     request,
     notify,

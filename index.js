@@ -4,6 +4,7 @@ const { loadExistingFile, saveFile, saveAsFile } = require('./editorCore');
 const editorState = require('./editorState');
 const documentModel = require('./documentModel');
 const { createLspManager, defaultLspConfigs } = require('./lspManager');
+const { severityLabel } = require('./lspDiagnostics');
 const syntaxService = require('./syntaxService');
 
 const initialFilePaths = process.argv.slice(2).map(file => path.resolve(process.cwd(), file));
@@ -36,6 +37,8 @@ let treeQuery = '';
 let treeMatches = [];
 let treeSearchIndex = -1;
 let treeSearchError = null;
+let lspHoverMessage = '';
+let lspHoverRequestId = 0;
 let quitting = false;
 
 const useColor = !process.env.NO_COLOR;
@@ -92,11 +95,17 @@ function loadActiveBuffer() {
   treeMatches = [];
   treeSearchIndex = -1;
   treeSearchError = null;
+  clearHoverMessage();
   quitConfirm = false;
 }
 
 function currentEditorState() {
   return { lines, cursorRow, cursorCol, dirty };
+}
+
+function clearHoverMessage() {
+  lspHoverMessage = '';
+  lspHoverRequestId++;
 }
 
 function applyEditorState(state) {
@@ -111,6 +120,7 @@ function refreshSyntax() {
 }
 
 function markBufferChanged() {
+  clearHoverMessage();
   documentModel.markChanged(activeBuffer());
   version = activeBuffer().version;
   dirty = activeBuffer().dirty;
@@ -135,18 +145,22 @@ function updateViewport() {
 }
 
 function moveLeft() {
+  clearHoverMessage();
   applyEditorState(editorState.moveLeft(currentEditorState()));
 }
 
 function moveRight() {
+  clearHoverMessage();
   applyEditorState(editorState.moveRight(currentEditorState()));
 }
 
 function moveUp() {
+  clearHoverMessage();
   applyEditorState(editorState.moveUp(currentEditorState()));
 }
 
 function moveDown() {
+  clearHoverMessage();
   applyEditorState(editorState.moveDown(currentEditorState()));
 }
 
@@ -199,12 +213,14 @@ function replaceAll() {
 
 function findNext() {
   if (!searchMatches.length) return;
+  clearHoverMessage();
   searchIndex = editorState.nextSearchIndex(searchMatches, searchIndex);
   applyEditorState(editorState.moveToSearchMatch(currentEditorState(), searchMatches, searchIndex));
 }
 
 function findPrevious() {
   if (!searchMatches.length) return;
+  clearHoverMessage();
   searchIndex = editorState.previousSearchIndex(searchMatches, searchIndex);
   applyEditorState(editorState.moveToSearchMatch(currentEditorState(), searchMatches, searchIndex));
 }
@@ -219,6 +235,7 @@ function updateTreeMatches() {
   treeMatches = result.matches;
   if (!treeMatches.length) return;
   treeSearchIndex = 0;
+  clearHoverMessage();
   cursorRow = treeMatches[0].row;
   cursorCol = treeMatches[0].col;
 }
@@ -231,6 +248,7 @@ function clearTreeSearch() {
 
 function treeSearchNext() {
   if (!treeMatches.length) return;
+  clearHoverMessage();
   treeSearchIndex = (treeSearchIndex + 1) % treeMatches.length;
   cursorRow = treeMatches[treeSearchIndex].row;
   cursorCol = treeMatches[treeSearchIndex].col;
@@ -238,9 +256,40 @@ function treeSearchNext() {
 
 function treeSearchPrevious() {
   if (!treeMatches.length) return;
+  clearHoverMessage();
   treeSearchIndex = (treeSearchIndex - 1 + treeMatches.length) % treeMatches.length;
   cursorRow = treeMatches[treeSearchIndex].row;
   cursorCol = treeMatches[treeSearchIndex].col;
+}
+
+function isHoverKey(key) {
+  return key.name === 'f1' || (key.ctrl && key.name === 'space') || key.sequence === '\u0000';
+}
+
+async function showHover() {
+  syncActiveBuffer();
+  const requestId = ++lspHoverRequestId;
+  const bufferId = activeBuffer().id;
+  const row = cursorRow;
+  const col = cursorCol;
+  const languageId = documentModel.languageIdForFilePath(filePath);
+  if (languageId !== 'javascript') {
+    lspHoverMessage = 'LSP hover: JavaScript files only';
+    render();
+    return;
+  }
+  if (!lspManager.isSupported(activeBuffer())) {
+    lspHoverMessage = 'LSP hover: not enabled';
+    render();
+    return;
+  }
+  lspHoverMessage = 'LSP hover: loading';
+  render();
+  const message = await lspManager.hover(activeBuffer(), row, col);
+  if (requestId !== lspHoverRequestId || activeBuffer().id !== bufferId || cursorRow !== row || cursorCol !== col) return;
+  const lspStatus = lspManager.status.get(languageId);
+  lspHoverMessage = message ? `LSP hover: ${message}` : lspStatus && lspStatus.available === false ? `LSP hover: server unavailable (${lspStatus.error})` : 'LSP hover: unavailable at cursor';
+  render();
 }
 
 function promptSearch() {
@@ -305,6 +354,39 @@ function bufferName(buffer) {
 function truncate(text, width) {
   if (text.length <= width) return text;
   return text.slice(0, Math.max(0, width - 1)) + '…';
+}
+
+function stripAnsi(text) {
+  return text.replace(/\u001b\[[0-9;]*m/g, '');
+}
+
+function padRendered(text, width) {
+  const plainLength = stripAnsi(text).length;
+  if (plainLength >= width) return text;
+  return text + ' '.repeat(width - plainLength);
+}
+
+function wrapText(text, width) {
+  if (!text) return [];
+  const words = text.split(/\s+/).filter(Boolean);
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    if (!current) {
+      current = word;
+    } else if (current.length + word.length + 1 <= width) {
+      current += ` ${word}`;
+    } else {
+      lines.push(current);
+      current = word;
+    }
+    while (current.length > width) {
+      lines.push(current.slice(0, width));
+      current = current.slice(width);
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
 }
 
 function styleCapture(capture, text) {
@@ -423,7 +505,7 @@ function renderTabs(cols) {
   return output || ' ';
 }
 
-function renderPrompt() {
+function renderPrompt(showInlineLsp = true) {
   if (openMode) return `${style.yellow('Open:')} ${openPath}`;
   if (saveAsMode) return `${style.yellow('Save as:')} ${saveAsPath}`;
   if (replaceMode) return replaceStage === 'query' ? `${style.yellow('Replace find:')} ${replaceQuery}` : `${style.yellow('Replace with:')} ${replaceText}`;
@@ -434,8 +516,58 @@ function renderPrompt() {
   const syntaxStatus = syntax && syntax.supported && syntax.available ? `   AST ${syntax.errors.length ? style.red(`${syntax.errors.length} error${syntax.errors.length === 1 ? '' : 's'}`) : style.green('ok')}` : '';
   const treeStatus = treeMatches.length ? `   Tree ${treeSearchIndex + 1}/${treeMatches.length}` : treeSearchError ? `   ${style.red('Tree error')}` : '';
   const diagnosticSummary = lspManager.diagnosticSummary(activeBuffer(), cursorRow, cursorCol);
-  const diagnosticStatus = diagnosticSummary ? `   ${style.red(diagnosticSummary)}` : '';
-  return `${style.mode(' EDIT ')}  Ln ${cursorRow + 1}, Col ${cursorCol + 1}   ${lines.length} lines   ${dirty ? style.yellow('modified') : style.green('saved')}${syntaxStatus}${treeStatus}${diagnosticStatus}`;
+  const hoverStatus = showInlineLsp && lspHoverMessage ? `   ${style.cyan(lspHoverMessage)}` : '';
+  const diagnosticStatus = showInlineLsp && diagnosticSummary ? `   ${style.red(diagnosticSummary)}` : '';
+  return `${style.mode(' EDIT ')}  Ln ${cursorRow + 1}, Col ${cursorCol + 1}   ${lines.length} lines   ${dirty ? style.yellow('modified') : style.green('saved')}${syntaxStatus}${treeStatus}${hoverStatus || diagnosticStatus}`;
+}
+
+function sidebarWidthForCols(cols) {
+  if (cols < 80) return 0;
+  return Math.min(36, Math.max(26, Math.floor(cols * 0.32)));
+}
+
+function renderSidebarLines(height, width) {
+  if (!width) return [];
+  const contentWidth = Math.max(1, width - 2);
+  const buffer = activeBuffer();
+  const languageId = documentModel.languageIdForFilePath(filePath);
+  const diagnostics = lspManager.diagnosticsForBuffer(buffer);
+  const lspStatus = languageId ? lspManager.status.get(languageId) : null;
+  const lines = [style.bold(' LSP')];
+
+  if (languageId !== 'javascript') {
+    lines.push('', style.dim(' JavaScript files only'));
+  } else if (!lspManager.isSupported(buffer)) {
+    lines.push('', style.yellow(' Not enabled'));
+  } else if (lspStatus && lspStatus.available === false) {
+    lines.push('', style.red(' Server unavailable'));
+    lines.push(...wrapText(lspStatus.error || 'Unknown error', contentWidth).map(line => ` ${line}`));
+  } else {
+    lines.push('', lspStatus && lspStatus.available ? style.green(' Server ready') : style.dim(' Server pending'));
+  }
+
+  if (lspHoverMessage) {
+    lines.push('', style.bold(' Hover'));
+    lines.push(...wrapText(lspHoverMessage, contentWidth).map(line => ` ${style.cyan(line)}`));
+  }
+
+  lines.push('', style.bold(` Diagnostics (${diagnostics.length})`));
+  if (diagnostics.length) {
+    const shownDiagnostics = diagnostics.slice(0, 3);
+    shownDiagnostics.forEach(diagnostic => {
+      const label = severityLabel(diagnostic.severity);
+      const row = diagnostic.range && diagnostic.range.start ? diagnostic.range.start.line + 1 : '?';
+      const text = `L${row} ${label}: ${diagnostic.message}`;
+      wrapText(text, contentWidth).forEach((line, index) => {
+        lines.push(` ${index === 0 ? style.red(line) : style.dim(line)}`);
+      });
+    });
+    if (diagnostics.length > shownDiagnostics.length) lines.push(style.dim(` … ${diagnostics.length - shownDiagnostics.length} more`));
+  } else {
+    lines.push(style.dim(' No diagnostics'));
+  }
+
+  return Array.from({ length: height }, (_, index) => padRendered(lines[index] || '', width));
 }
 
 function renderHelp() {
@@ -444,7 +576,7 @@ function renderHelp() {
   if (replaceMode) return `${style.bold('Enter')} ${style.dim('accept')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+R')} ${style.dim('replace all')}  ${style.bold('Ctrl+F')} ${style.dim('search')}`;
   if (searchMode) return `${style.bold('Enter')} ${style.dim('search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+F')} ${style.dim('search')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
   if (treeSearchMode) return `${style.bold('Enter')} ${style.dim('tree search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Presets')} ${style.dim('functions/calls/classes')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
-  return `${style.bold('Ctrl+S')} ${style.dim('Save')}  ${style.bold('Ctrl+O')} ${style.dim('Open')}  ${style.bold('Ctrl+N/P')} ${style.dim('Next/Prev')}  ${style.bold('Ctrl+Q')} ${style.dim('Quit')}  ${style.bold('Ctrl+F')} ${style.dim('Search')}  ${style.bold('Ctrl+R')} ${style.dim('Replace')}  ${style.bold('Ctrl+T')} ${style.dim('Tree')}`;
+  return `${style.bold('Ctrl+S')} ${style.dim('Save')}  ${style.bold('Ctrl+O')} ${style.dim('Open')}  ${style.bold('Ctrl+N/P')} ${style.dim('Next/Prev')}  ${style.bold('Ctrl+Q')} ${style.dim('Quit')}  ${style.bold('Ctrl+F')} ${style.dim('Search')}  ${style.bold('Ctrl+R')} ${style.dim('Replace')}  ${style.bold('Ctrl+T')} ${style.dim('Tree')}  ${style.bold('Ctrl+Space/F1')} ${style.dim('Hover')}`;
 }
 
 function render() {
@@ -452,15 +584,18 @@ function render() {
   syncActiveBuffer();
   const rows = process.stdout.rows || 24;
   const cols = process.stdout.columns || 80;
+  const sidebarWidth = sidebarWidthForCols(cols);
+  const leftCols = sidebarWidth ? cols - sidebarWidth - 1 : cols;
   const visibleLines = Math.max(1, rows - 6);
   const visibleText = Array.from({ length: visibleLines }, (_, index) => lines[viewportRow + index] || '');
+  const sidebarLines = renderSidebarLines(visibleLines, sidebarWidth);
   const status = filePath ? path.relative(process.cwd(), filePath) : '[No file]';
   const totalLines = lines.length;
   const syntax = syntaxService.getBufferState(activeBuffer().id);
   const highlights = syntax ? syntax.highlights : [];
   const gutterWidth = String(Math.max(totalLines, viewportRow + visibleLines)).length;
   const gutterLength = gutterWidth + 5;
-  const textWidth = Math.max(1, cols - gutterLength);
+  const textWidth = Math.max(1, leftCols - gutterLength);
   const output = '\u001b[?25l\u001b[2J\u001b[H' + [
     renderHeader(cols, status),
     renderTabs(cols),
@@ -471,10 +606,11 @@ function render() {
       const caret = active ? style.cyan('>') : ' ';
       const lineNumber = String(absoluteRow + 1).padStart(gutterWidth);
       const gutter = `${caret} ${style.dim(lineNumber)} ${style.dim('│')} `;
-      return `${gutter}${renderDecoratedLine(line, absoluteRow, textWidth, highlights)}`;
+      const editorLine = padRendered(`${gutter}${renderDecoratedLine(line, absoluteRow, textWidth, highlights)}`, leftCols);
+      return sidebarWidth ? `${editorLine}${style.dim('│')}${sidebarLines[index]}` : editorLine;
     }),
     separator(cols),
-    renderPrompt(),
+    renderPrompt(!sidebarWidth),
     renderHelp()
   ].join('\n');
   process.stdout.write(output);
@@ -773,6 +909,10 @@ process.stdin.on('keypress', (_, key) => {
   if (key.ctrl && key.name === 't') {
     promptTreeSearch();
     render();
+    return;
+  }
+  if (isHoverKey(key)) {
+    void showHover();
     return;
   }
   if (key.ctrl && key.name === 'g') {

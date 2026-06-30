@@ -2,14 +2,35 @@ const documentModel = require('./documentModel');
 const { createLspClient } = require('./lspClient');
 const { createDiagnosticStore } = require('./lspDiagnostics');
 
+function splitArgs(value) {
+  return value ? value.split(' ').filter(Boolean) : [];
+}
+
 function defaultLspConfigs(env = process.env) {
-  if (!env.TEXT_EDITOR_JS_LSP) return {};
+  if (env.TEXT_EDITOR_JS_LSP === '0' || env.TEXT_EDITOR_JS_LSP === 'false') return {};
+  const command = env.TEXT_EDITOR_JS_LSP || 'typescript-language-server';
+  const args = env.TEXT_EDITOR_JS_LSP_ARGS ? splitArgs(env.TEXT_EDITOR_JS_LSP_ARGS) : command.includes('typescript-language-server') ? ['--stdio'] : [];
   return {
     javascript: {
-      command: env.TEXT_EDITOR_JS_LSP,
-      args: env.TEXT_EDITOR_JS_LSP_ARGS ? env.TEXT_EDITOR_JS_LSP_ARGS.split(' ').filter(Boolean) : [],
+      command,
+      args,
     },
   };
+}
+
+function formatHoverContents(result, maxLength = 120) {
+  if (!result || !result.contents) return null;
+  const text = hoverContentsToText(result.contents).replace(/\s+/g, ' ').trim();
+  if (!text) return null;
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function hoverContentsToText(contents) {
+  if (typeof contents === 'string') return contents;
+  if (Array.isArray(contents)) return contents.map(hoverContentsToText).filter(Boolean).join('\n');
+  if (contents && typeof contents.value === 'string') return contents.value;
+  return '';
 }
 
 function createLspManager(options = {}) {
@@ -53,6 +74,7 @@ function createLspManager(options = {}) {
         });
       }
       await client.initialize();
+      if (client.initialized) client.initialized();
       clients.set(languageId, client);
       status.set(languageId, { available: true, error: null });
       return client;
@@ -106,6 +128,19 @@ function createLspManager(options = {}) {
     return diagnostics.summary(documentModel.bufferUri(buffer), row, col);
   }
 
+  async function hover(buffer, row, col) {
+    if (!isSupported(buffer)) return null;
+    try {
+      await openBuffer(buffer);
+      const client = await startForBuffer(buffer);
+      if (!client || !client.hover) return null;
+      const result = await client.hover(documentModel.documentPositionParams(buffer, row, col));
+      return formatHoverContents(result);
+    } catch (_) {
+      return null;
+    }
+  }
+
   async function shutdown() {
     const startedClients = Array.from(clients.values());
     await Promise.all(startedClients.map(client => {
@@ -119,6 +154,7 @@ function createLspManager(options = {}) {
     openBuffer,
     changeBuffer,
     saveBuffer,
+    hover,
     diagnosticsForBuffer,
     diagnosticSummary,
     shutdown,
@@ -131,4 +167,5 @@ function createLspManager(options = {}) {
 module.exports = {
   createLspManager,
   defaultLspConfigs,
+  formatHoverContents,
 };

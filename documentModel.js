@@ -122,6 +122,18 @@ function documentSaveEvent(buffer) {
   };
 }
 
+function documentPositionParams(buffer, row, col) {
+  return {
+    textDocument: {
+      uri: bufferUri(buffer),
+    },
+    position: {
+      line: row,
+      character: col,
+    },
+  };
+}
+
 function positionToOffset(lines, row, col) {
   const safeLines = normaliseLines(lines);
   const safeRow = Math.max(0, Math.min(row, safeLines.length - 1));
@@ -164,6 +176,7 @@ module.exports = {
   documentChangeEvent,
   documentOpenEvent,
   documentSaveEvent,
+  documentPositionParams,
   positionToOffset,
   offsetToPosition,
 };

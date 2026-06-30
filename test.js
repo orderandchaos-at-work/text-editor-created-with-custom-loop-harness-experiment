@@ -6,7 +6,7 @@ const { loadFile, saveFile, resolveSaveAsPath, saveAsFile } = require('./editorC
 const documentModel = require('./documentModel');
 const { createLspClient, encodeMessage, createMessageParser } = require('./lspClient');
 const { createDiagnosticStore, severityLabel } = require('./lspDiagnostics');
-const { createLspManager, defaultLspConfigs } = require('./lspManager');
+const { createLspManager, defaultLspConfigs, formatHoverContents } = require('./lspManager');
 const syntaxService = require('./syntaxService');
 const {
   createEditorState,
@@ -414,6 +414,15 @@ describe('document model', () => {
       text: 'const a = 1;\na;',
     }));
   });
+
+  test('creates LSP text document position params', () => {
+    const buffer = documentModel.createBuffer(7, '/tmp/example.js', ['const value = 1;']);
+
+    expect(documentModel.documentPositionParams(buffer, 0, 6)).toEqual({
+      textDocument: { uri: 'file:///tmp/example.js' },
+      position: { line: 0, character: 6 },
+    });
+  });
 });
 
 describe('lsp diagnostics', () => {
@@ -482,14 +491,15 @@ describe('lsp diagnostics', () => {
 
 describe('lsp client', () => {
   class FakeTransport extends EventEmitter {
-    constructor() {
+    constructor(results = {}) {
       super();
+      this.results = results;
       this.messages = [];
       this.ended = false;
       this.parse = createMessageParser(message => {
         this.messages.push(message);
         if (message.id !== undefined) {
-          const result = message.method === 'initialize' ? { capabilities: { textDocumentSync: 1 } } : null;
+          const result = Object.prototype.hasOwnProperty.call(this.results, message.method) ? this.results[message.method] : message.method === 'initialize' ? { capabilities: { textDocumentSync: 1 } } : null;
           this.emit('data', encodeMessage({ jsonrpc: '2.0', id: message.id, result }));
         }
       });
@@ -511,6 +521,7 @@ describe('lsp client', () => {
 
     client.start();
     await expect(client.initialize()).resolves.toEqual({ capabilities: { textDocumentSync: 1 } });
+    client.initialized();
     client.didOpen(buffer);
     buffer.lines = ['const a = 2;', 'a;'];
     documentModel.markChanged(buffer);
@@ -520,6 +531,7 @@ describe('lsp client', () => {
 
     expect(transport.messages.map(message => message.method)).toEqual([
       'initialize',
+      'initialized',
       'textDocument/didOpen',
       'textDocument/didChange',
       'textDocument/didSave',
@@ -531,21 +543,21 @@ describe('lsp client', () => {
       rootUri: 'file:///tmp/project',
       capabilities: {},
     }));
-    expect(transport.messages[1].params.textDocument).toEqual({
+    expect(transport.messages[2].params.textDocument).toEqual({
       uri: 'file:///tmp/project/example.js',
       languageId: 'javascript',
       version: 0,
       text: 'const a = 1;',
     });
-    expect(transport.messages[2].params).toEqual({
+    expect(transport.messages[3].params).toEqual({
       textDocument: {
         uri: 'file:///tmp/project/example.js',
         version: 1,
       },
       contentChanges: [{ text: 'const a = 2;\na;' }],
     });
-    expect(transport.messages[2].params.contentChanges[0].range).toBeUndefined();
-    expect(transport.messages[3].params).toEqual({
+    expect(transport.messages[3].params.contentChanges[0].range).toBeUndefined();
+    expect(transport.messages[4].params).toEqual({
       textDocument: { uri: 'file:///tmp/project/example.js' },
       text: 'const a = 2;\na;',
     });
@@ -606,6 +618,35 @@ describe('lsp client', () => {
       diagnostics: [expect.objectContaining({ message: 'broken' })],
     });
   });
+
+  test('parses byte-length framed messages when multiple responses share a chunk', () => {
+    const messages = [];
+    const parse = createMessageParser(message => messages.push(message));
+    const first = { jsonrpc: '2.0', method: 'one', params: { text: '🙂' } };
+    const second = { jsonrpc: '2.0', method: 'two', params: { text: 'done' } };
+
+    parse(Buffer.from(encodeMessage(first) + encodeMessage(second)));
+
+    expect(messages).toEqual([first, second]);
+  });
+
+  test('sends hover requests and resolves hover responses', async () => {
+    const hoverResult = { contents: { kind: 'markdown', value: 'const value: number' } };
+    const transport = new FakeTransport({ 'textDocument/hover': hoverResult });
+    const client = createLspClient({ transport });
+    const params = {
+      textDocument: { uri: 'file:///tmp/example.js' },
+      position: { line: 0, character: 6 },
+    };
+
+    client.start();
+
+    await expect(client.hover(params)).resolves.toEqual(hoverResult);
+    expect(transport.messages[0]).toEqual(expect.objectContaining({
+      method: 'textDocument/hover',
+      params,
+    }));
+  });
 });
 
 describe('lsp manager', () => {
@@ -613,9 +654,11 @@ describe('lsp manager', () => {
     return {
       start: jest.fn(),
       initialize: jest.fn(() => Promise.resolve({ capabilities: {} })),
+      initialized: jest.fn(),
       didOpen: jest.fn(),
       didChange: jest.fn(),
       didSave: jest.fn(),
+      hover: jest.fn(() => Promise.resolve({ contents: 'const value: number' })),
       shutdown: jest.fn(() => Promise.resolve()),
       onNotification: jest.fn((method, handler) => {
         handlers[method] = handler;
@@ -623,14 +666,21 @@ describe('lsp manager', () => {
     };
   }
 
-  test('reads optional JavaScript LSP config from environment variables', () => {
-    expect(defaultLspConfigs({})).toEqual({});
+  test('uses local JavaScript LSP defaults and allows environment overrides', () => {
+    expect(defaultLspConfigs({})).toEqual({
+      javascript: {
+        command: 'typescript-language-server',
+        args: ['--stdio'],
+      },
+    });
+    expect(defaultLspConfigs({ TEXT_EDITOR_JS_LSP: '0' })).toEqual({});
+    expect(defaultLspConfigs({ TEXT_EDITOR_JS_LSP: 'false' })).toEqual({});
     expect(defaultLspConfigs({
-      TEXT_EDITOR_JS_LSP: 'typescript-language-server',
+      TEXT_EDITOR_JS_LSP: 'custom-language-server',
       TEXT_EDITOR_JS_LSP_ARGS: '--stdio --log-level 4',
     })).toEqual({
       javascript: {
-        command: 'typescript-language-server',
+        command: 'custom-language-server',
         args: ['--stdio', '--log-level', '4'],
       },
     });
@@ -662,6 +712,7 @@ describe('lsp manager', () => {
     expect(createClient).toHaveBeenCalledWith({ command: 'js-lsp' });
     expect(client.start).toHaveBeenCalledTimes(1);
     expect(client.initialize).toHaveBeenCalledTimes(1);
+    expect(client.initialized).toHaveBeenCalledTimes(1);
     expect(client.didOpen).toHaveBeenCalledTimes(1);
     expect(client.didOpen).toHaveBeenCalledWith(buffer);
   });
@@ -749,6 +800,43 @@ describe('lsp manager', () => {
     await manager.openBuffer(buffer);
     await expect(manager.shutdown()).resolves.toBeUndefined();
     expect(client.shutdown).toHaveBeenCalledTimes(1);
+  });
+
+  test('formats hover responses for status display', () => {
+    expect(formatHoverContents(null)).toBe(null);
+    expect(formatHoverContents({ contents: ' plain text ' })).toBe('plain text');
+    expect(formatHoverContents({ contents: { kind: 'markdown', value: 'const value: number' } })).toBe('const value: number');
+    expect(formatHoverContents({ contents: { language: 'javascript', value: 'let name: string' } })).toBe('let name: string');
+    expect(formatHoverContents({ contents: [{ language: 'javascript', value: 'const a: number' }, 'docs'] })).toBe('const a: number docs');
+    expect(formatHoverContents({ contents: 'line one\nline two' })).toBe('line one line two');
+    expect(formatHoverContents({ contents: '1234567890' }, 6)).toBe('12345…');
+  });
+
+  test('requests hover for configured JavaScript buffers only', async () => {
+    const client = createFakeClient();
+    const manager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => client });
+    const jsBuffer = documentModel.createBuffer(1, '/tmp/example.js', ['const value = 1;']);
+    const textBuffer = documentModel.createBuffer(2, '/tmp/example.txt', ['plain']);
+
+    await expect(manager.hover(textBuffer, 0, 1)).resolves.toBe(null);
+    await expect(manager.hover(jsBuffer, 0, 6)).resolves.toBe('const value: number');
+
+    expect(client.didOpen).toHaveBeenCalledWith(jsBuffer);
+    expect(client.hover).toHaveBeenCalledWith({
+      textDocument: { uri: 'file:///tmp/example.js' },
+      position: { line: 0, character: 6 },
+    });
+  });
+
+  test('returns null for hover when config is missing or request fails', async () => {
+    const buffer = documentModel.createBuffer(1, '/tmp/example.js', ['const value = 1;']);
+    const missingConfigManager = createLspManager({ configs: {}, createClient: jest.fn() });
+    const failingClient = createFakeClient();
+    failingClient.hover.mockRejectedValue(new Error('hover failed'));
+    const failingManager = createLspManager({ configs: { javascript: { command: 'js-lsp' } }, createClient: () => failingClient });
+
+    await expect(missingConfigManager.hover(buffer, 0, 6)).resolves.toBe(null);
+    await expect(failingManager.hover(buffer, 0, 6)).resolves.toBe(null);
   });
 });
 

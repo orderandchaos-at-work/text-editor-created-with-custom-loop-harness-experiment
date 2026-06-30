@@ -70,14 +70,15 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] `Esc` exits tree query mode without changing the current query results.
 - [ ] A malformed tree query or preset shows a tree error in the status row without crashing.
 
-## Optional JavaScript LSP diagnostics
+## JavaScript LSP diagnostics
 
-- [ ] Running without LSP environment variables behaves normally and shows no LSP error spam.
-- [ ] If installed, run `TEXT_EDITOR_JS_LSP=typescript-language-server TEXT_EDITOR_JS_LSP_ARGS="--stdio" npm start -- path/to/file.js`.
+- [ ] After `npm install`, running `npm start -- path/to/file.js` for a JavaScript file starts `typescript-language-server --stdio` without extra environment variables.
+- [ ] Running with `TEXT_EDITOR_JS_LSP=0 npm start -- path/to/file.js` behaves normally and shows no LSP error spam.
+- [ ] Setting `TEXT_EDITOR_JS_LSP` and `TEXT_EDITOR_JS_LSP_ARGS` overrides the default server command.
 - [ ] Opening a `.js`, `.jsx`, `.mjs`, or `.cjs` file starts diagnostics without blocking editor startup.
-- [ ] A JavaScript diagnostic appears in the status row after the language server responds.
-- [ ] Moving the cursor to a line with diagnostics shows the first diagnostic for that line.
-- [ ] Moving away from diagnostic lines shows the active buffer diagnostic count when diagnostics exist.
+- [ ] A JavaScript diagnostic appears in the LSP sidebar after the language server responds when the terminal is wide enough.
+- [ ] The LSP sidebar shows server status, hover space, and an active-buffer diagnostics preview.
+- [ ] In a narrow terminal, diagnostics fall back to the status row.
 - [ ] Editing a JavaScript buffer updates diagnostics after full-document `didChange` sync.
 - [ ] Saving a JavaScript buffer keeps the editor responsive and sends `didSave`.
 - [ ] Save-as from an unnamed or differently named buffer to a JavaScript path opens the new URI and saves it.
@@ -85,9 +86,24 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Quitting attempts LSP shutdown and restores the terminal.
 - [ ] Setting `TEXT_EDITOR_JS_LSP` to a missing command does not crash the editor.
 
+## JavaScript LSP hover
+
+- [ ] After `npm install`, running `npm start -- path/to/file.js` for a JavaScript file enables hover without extra environment variables.
+- [ ] Running with `TEXT_EDITOR_JS_LSP=0 npm start -- path/to/file.js` behaves normally when pressing `Ctrl+Space` or `F1` and shows `LSP hover: not enabled`.
+- [ ] Setting `TEXT_EDITOR_JS_LSP` and `TEXT_EDITOR_JS_LSP_ARGS` overrides the default server command.
+- [ ] Place the cursor on a JavaScript symbol and press `Ctrl+Space`.
+- [ ] If `Ctrl+Space` does not show `LSP hover: loading`, try `F1` because some OS/terminal setups intercept `Ctrl+Space`.
+- [ ] Hover text appears in the LSP sidebar after the loading state when the terminal is wide enough.
+- [ ] In a narrow terminal, hover falls back to compact one-line status text.
+- [ ] Pressing `Ctrl+Space` or `F1` on whitespace or a symbol without hover information does not crash.
+- [ ] Moving the cursor clears the hover message from the sidebar.
+- [ ] Editing clears the hover message and still sends diagnostics updates.
+- [ ] Diagnostics remain visible in the sidebar after hover text is cleared.
+- [ ] Setting `TEXT_EDITOR_JS_LSP` to a missing command does not crash the editor when pressing `Ctrl+Space` or `F1`.
+
 ## Rendering
 
-- [ ] Header, tabs, line numbers, status row, and help row render clearly.
+- [ ] Header, tabs, line numbers, LSP sidebar, status row, and help row render clearly.
 - [ ] Active buffer is visually distinct in the tab row.
 - [ ] Active line marker follows the cursor.
 - [ ] Terminal resize redraws the editor correctly.

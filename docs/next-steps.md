@@ -2,91 +2,87 @@
 
 ## Current implementation status
 
-Tree-sitter JavaScript support is now active in the workspace.
+The editor now has the JavaScript syntax, document-model, LSP diagnostics, and LSP hover foundations in place.
 
 Implemented:
 
-- `tree-sitter` and `tree-sitter-javascript` are installed and runtime tests execute.
-- Search match calculation, search navigation, replace current, and replace all logic live in `editorState.js` with automated tests.
-- JavaScript language detection supports `.js`, `.jsx`, `.mjs`, and `.cjs`.
-- `syntaxService.js` maintains cached per-buffer syntax state with parser, tree, version, errors, highlights, and query matches.
-- Supported buffers are parsed on open/create and refreshed after edits with full-buffer reparse.
-- Rendering consumes cached syntax state instead of parsing during render.
-- `Ctrl+T` supports raw Tree-sitter queries and friendly AST search presets.
-- JavaScript syntax highlighting has expanded coverage for imports/exports, declarations, calls, classes, properties, literals, comments, constants, builtin variables, and safe operators.
+- Core terminal editor with multiple buffers, open/save/save-as, search, replace, and Tree-sitter query search.
+- JavaScript language detection for `.js`, `.jsx`, `.mjs`, and `.cjs`.
+- Tree-sitter JavaScript parsing, syntax highlighting, syntax errors, and friendly AST search presets.
+- Per-buffer syntax cache in `syntaxService.js`; render consumes prepared syntax state and does not parse every render.
+- Multi-buffer state coverage for cursor, dirty state, save behavior, and syntax cache isolation.
+- `documentModel.js` owns buffer/document helpers, text snapshots, position/offset conversion, versioning, dirty state, and normalized document open/change/save events.
+- `lspClient.js` provides a minimal JSON-RPC/LSP client with fake-transport tests.
+- JavaScript LSP diagnostics default to `typescript-language-server --stdio`, with `TEXT_EDITOR_JS_LSP` and `TEXT_EDITOR_JS_LSP_ARGS` available for overrides and `TEXT_EDITOR_JS_LSP=0` for opt-out.
+- LSP lifecycle wiring sends `didOpen`, full-document `didChange`, `didSave`, and best-effort shutdown for configured JavaScript buffers.
+- `textDocument/publishDiagnostics` notifications are stored per buffer URI and shown in the LSP sidebar for the active buffer when the terminal is wide enough, with a narrow-terminal status row fallback.
+- `Ctrl+Space` requests `textDocument/hover` for the active JavaScript buffer and cursor position, with `F1` as a fallback for terminals or OS shortcuts that intercept `Ctrl+Space`.
+- Hover requests show immediate loading feedback, then normalized readable text in the LSP sidebar, and clear after cursor movement or edits.
+- Missing or unstartable LSP servers are handled without crashing the editor.
 
 Current verification:
 
-- `npm test` passes with 30 tests and no skipped Tree-sitter runtime tests.
+- `npm test` passes with fake LSP clients/transports and no required external language server.
 
-## 1. Stabilize and document the current app
+## 1. Manually QA JavaScript LSP hover
 
-The editor is already usable, so keep the current behavior easy to understand and verify.
+Hover is implemented with fake-client automated coverage. Verify it with a real language server before adding more interactive LSP features.
 
-- Keep `README.md` current with setup, usage, controls, and known limitations.
-- Use `docs/manual-qa.md` for terminal behavior that is not covered by automated tests.
-- Commit the current working state before larger refactors.
+Target behavior:
 
-## 2. Expand automated tests around multi-buffer state
+- `Ctrl+Space` requests `textDocument/hover` for the active JavaScript buffer and cursor position; `F1` works as a fallback if `Ctrl+Space` is intercepted.
+- Hover uses the active buffer URI and zero-based cursor position.
+- Hover runs when the default or overridden JavaScript LSP client is available.
+- Disabled config, missing server, request errors, or empty hover responses do not crash or spam errors.
+- Hover responses are normalized into readable sidebar text, with status-row fallback in narrow terminals.
+- Hover text clears after cursor movement or edits.
+- Diagnostics remain visible in the LSP sidebar independently of hover text.
 
-Jest coverage now includes file helpers, extracted editor state helpers, Tree-sitter parsing, syntax caching, AST presets, and representative highlight captures.
+## 2. Add go to definition
 
-Remaining suggested coverage:
+After hover is stable, add `textDocument/definition`.
 
-1. Buffer switching and cursor preservation.
-2. Dirty-state preservation per buffer.
-3. Save clearing dirty state for the saved buffer.
-4. Syntax cache association with the correct buffer after switching.
-5. Search and tree-query matches not bleeding between buffers.
+Recommended first scope:
 
-Rationale: these are the behaviors most likely to regress during the next document-model refactor.
+- Same-file jumps first.
+- Then open target files when a definition points to another URI.
+- Keep the current buffer/cursor history simple before adding jump-back support.
 
-## 3. Extract a document model boundary
+## 3. Improve diagnostic display
 
-Add a small `documentModel.js` layer before LSP or incremental parsing work.
+Diagnostics currently appear in the LSP sidebar when space is available. Next UI improvements can be incremental:
 
-Responsibilities:
+- Add simple gutter markers for lines with errors/warnings.
+- Keep inline underlines for later because they must merge with syntax, search, and tree-search decorations.
+- Preserve active-buffer diagnostic isolation.
 
-- Own buffers and the current buffer id.
-- Track buffer versions and dirty state.
-- Provide full text from `lines`.
-- Convert position to offset and offset to position.
-- Apply edits through helpers that can emit normalized edit events.
+## 4. Add completion UI
 
-Rationale: Tree-sitter and future LSP integration should subscribe to document changes instead of terminal key handling.
+Completion is more UI-heavy than hover or definition.
 
-## 4. Improve long-line handling
+Before implementing it, decide how the terminal popup/list should work:
 
-Choose a clear long-line strategy.
+- navigation keys
+- filtering
+- inserting plain text versus snippets
+- cancellation on movement/edit
+- display limits for small terminal windows
 
-Recommended option: horizontal scrolling.
+## 5. Consider incremental sync later
 
-Rationale: horizontal scrolling fits a code-editor-style terminal UI better than soft wrapping and avoids changing document line structure during rendering.
+The editor currently uses full-document LSP sync. Keep it that way until the document model owns normalized edit application more completely.
 
-## 5. Improve Unicode display handling
+Incremental sync should wait until edits flow through one model boundary that can emit reliable ranges and replacement text.
 
-Plain string length does not always match terminal display width for emoji, CJK characters, and combining characters.
+## 6. Continue editor polish
 
-Before adding a dependency, verify CommonJS compatibility and keep runtime dependencies minimal.
+Remaining non-LSP polish:
 
-## 6. Consolidate keybindings
+- horizontal scrolling for long lines
+- better Unicode display-width handling
+- consolidated keybinding metadata for input handling, README controls, and help text
+- broader language support only after the JavaScript LSP path remains stable
 
-Move keybinding metadata into one shared structure that can power both input handling and help text.
-
-Rationale: this avoids documentation drift between actual behavior, the README, and the in-editor help row.
-
-## 7. Continue language-aware editing
-
-Tree-sitter remains the accepted first language-aware layer. The local AST path is now stable enough to build on.
-
-Next candidates:
-
-- Add more automated coverage for multi-buffer syntax state.
-- Add more JavaScript AST presets if they are useful in daily editing.
-- Add more languages only after the JavaScript path stays stable.
-- Add incremental Tree-sitter parsing after normalized edit events exist.
-- Add LSP later, after the document model is stable.
-
-Before adding any new dependency, verify CommonJS compatibility and keep the dependency set minimal.
+Before adding any dependency, verify CommonJS compatibility and keep the dependency set minimal.
 
 See `docs/lsp-ast-syntax-plan.md` for the broader Tree-sitter and LSP integration plan.
