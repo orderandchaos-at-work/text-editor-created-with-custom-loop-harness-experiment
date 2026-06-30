@@ -8,7 +8,7 @@ Before adding LSP or incremental parsing, extract a small document model so pars
 
 ## Current implementation status
 
-Tree-sitter-first JavaScript support is implemented and verified.
+Tree-sitter-first JavaScript support and the initial JavaScript LSP diagnostics/hover path are implemented and verified.
 
 Implemented:
 
@@ -21,11 +21,17 @@ Implemented:
 - Tree query matches can be navigated with `Ctrl+G` and `Ctrl+Shift+G`.
 - `Ctrl+T` accepts raw Tree-sitter queries and friendly presets such as `functions`, `classes`, `imports`, `calls`, `calls:<name>`, `variables`, and `syntax-errors`.
 - JavaScript syntax highlighting covers representative imports/exports, declarations, calls, classes, properties, strings, template strings, regex literals, numbers, comments, constants, builtin variables, and safe operators.
+- Multi-buffer state coverage verifies cursor, dirty state, save behavior, and syntax cache isolation.
+- `documentModel.js` owns buffer/document helpers, text snapshots, position/offset conversion, versioning, dirty state, and normalized document open/change/save events.
+- JavaScript LSP process management uses `typescript-language-server --stdio` by default, with environment overrides and opt-out support.
+- LSP full-document sync sends `didOpen`, `didChange`, `didSave`, and best-effort shutdown for configured JavaScript buffers.
+- LSP diagnostics are rendered in the sidebar for wide terminals with a narrow-terminal status row fallback.
+- LSP hover is available with `Ctrl+Space` and `F1`, has been verified against the real default language server through `npm start`, and renders in the LSP sidebar.
 - Jest tests cover language detection, line-to-text conversion, parsing, syntax errors, highlight captures, cached syntax state, raw queries, AST presets, and extracted search/replace helpers.
 
 Verification:
 
-- `npm test` passes with 30 tests and no skipped Tree-sitter runtime tests.
+- `npm test` passes with Tree-sitter, document model, and fake LSP coverage.
 
 ## Recommended architecture
 
@@ -143,7 +149,7 @@ Tree-sitter comes before LSP. Build local AST parsing, syntax highlighting, synt
 
 ## Feature order
 
-Completed:
+Completed Tree-sitter baseline:
 
 1. Add language detection and full-text helpers.
 2. Add Tree-sitter JavaScript parsing with syntax-error detection.
@@ -153,14 +159,22 @@ Completed:
 6. Add friendly AST search presets.
 7. Expand representative JavaScript highlighting.
 
-Next:
+Completed since the original next list:
 
 1. Add automated coverage for buffer switching, dirty-state preservation, and multi-buffer syntax cache behavior.
 2. Extract `documentModel.js` for buffers, versions, dirty state, full text, position/offset helpers, and edit application.
-3. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
-4. Add LSP process management and full-document sync.
-5. Render LSP diagnostics.
-6. Add hover, completion, go-to-definition, references, rename, and formatting.
+3. Add LSP process management and full-document sync.
+4. Render LSP diagnostics.
+5. Add hover.
+
+Next:
+
+1. Optimize Tree-sitter incremental edit ranges after normalized edit events exist.
+2. Add go-to-definition.
+3. Add completion.
+4. Add references.
+5. Add rename.
+6. Add formatting.
 7. Add more grammars and configurable language-server commands.
 
 ## Testing strategy
@@ -169,13 +183,10 @@ Automated tests currently cover the Tree-sitter baseline and extracted search/re
 
 Next automated tests:
 
-- buffer switching and cursor preservation
-- dirty-state preservation and save behavior
-- syntax state staying associated with the correct buffer
 - search/tree matches not bleeding between buffers
-- offset/position conversion across multiple lines
 - normalized edit event generation
-- LSP JSON-RPC message wrapper with a fake child process or fake connection
+- go-to-definition request/response normalization with fake LSP clients
+- completion request/response normalization and UI state transitions
 
 Keep manual QA for terminal rendering, keybindings, and interactive language-server behavior.
 
@@ -183,5 +194,4 @@ Keep manual QA for terminal rendering, keybindings, and interactive language-ser
 
 - Whether to keep using CommonJS or migrate to ESM before adding modern parser/LSP packages.
 - Whether to vendor highlight queries or keep local minimal queries.
-- Which JavaScript language server command to recommend as the default.
 - How diagnostics and highlights should interact when ranges overlap.

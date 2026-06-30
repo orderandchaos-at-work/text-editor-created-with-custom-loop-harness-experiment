@@ -24,11 +24,11 @@ Current verification:
 
 - `npm test` passes with fake LSP clients/transports and no required external language server.
 
-## 1. Manually QA JavaScript LSP hover
+## Completed follow-up: Manually QA JavaScript LSP hover
 
-Hover is implemented with fake-client automated coverage. Verify it with a real language server before adding more interactive LSP features.
+Hover is implemented with fake-client automated coverage and has now been verified with the real default JavaScript language server through `npm start`.
 
-Target behavior:
+Verified behavior:
 
 - `Ctrl+Space` requests `textDocument/hover` for the active JavaScript buffer and cursor position; `F1` works as a fallback if `Ctrl+Space` is intercepted.
 - Hover uses the active buffer URI and zero-based cursor position.
@@ -38,7 +38,7 @@ Target behavior:
 - Hover text clears after cursor movement or edits.
 - Diagnostics remain visible in the LSP sidebar independently of hover text.
 
-## 2. Add go to definition
+## 1. Add go to definition
 
 After hover is stable, add `textDocument/definition`.
 
@@ -48,7 +48,7 @@ Recommended first scope:
 - Then open target files when a definition points to another URI.
 - Keep the current buffer/cursor history simple before adding jump-back support.
 
-## 3. Improve diagnostic display
+## 2. Improve diagnostic display
 
 Diagnostics currently appear in the LSP sidebar when space is available. Next UI improvements can be incremental:
 
@@ -56,7 +56,7 @@ Diagnostics currently appear in the LSP sidebar when space is available. Next UI
 - Keep inline underlines for later because they must merge with syntax, search, and tree-search decorations.
 - Preserve active-buffer diagnostic isolation.
 
-## 4. Add completion UI
+## 3. Add completion UI
 
 Completion is more UI-heavy than hover or definition.
 
@@ -68,13 +68,13 @@ Before implementing it, decide how the terminal popup/list should work:
 - cancellation on movement/edit
 - display limits for small terminal windows
 
-## 5. Consider incremental sync later
+## 4. Consider incremental sync later
 
 The editor currently uses full-document LSP sync. Keep it that way until the document model owns normalized edit application more completely.
 
 Incremental sync should wait until edits flow through one model boundary that can emit reliable ranges and replacement text.
 
-## 6. Continue editor polish
+## 5. Continue editor polish
 
 Remaining non-LSP polish:
 
