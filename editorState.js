@@ -1,3 +1,29 @@
+function isCombiningMark(char) {
+  const code = char.codePointAt(0);
+  return (code >= 0x0300 && code <= 0x036f) || (code >= 0x1ab0 && code <= 0x1aff) || (code >= 0x1dc0 && code <= 0x1dff) || (code >= 0x20d0 && code <= 0x20ff) || (code >= 0xfe20 && code <= 0xfe2f);
+}
+
+function nextColumn(line, col) {
+  if (col >= line.length) return line.length;
+  let next = col + Array.from(line.slice(col))[0].length;
+  while (next < line.length) {
+    const char = Array.from(line.slice(next))[0];
+    if (!isCombiningMark(char)) break;
+    next += char.length;
+  }
+  return next;
+}
+
+function previousColumn(line, col) {
+  if (col <= 0) return 0;
+  let previous = 0;
+  for (let index = 0; index < col;) {
+    previous = index;
+    index = nextColumn(line, index);
+  }
+  return previous;
+}
+
 function createEditorState(lines = ['']) {
   return {
     lines: lines.length ? [...lines] : [''],
@@ -18,7 +44,7 @@ function clampCursor(state) {
 }
 
 function moveLeft(state) {
-  if (state.cursorCol > 0) state.cursorCol--;
+  if (state.cursorCol > 0) state.cursorCol = previousColumn(state.lines[state.cursorRow], state.cursorCol);
   else if (state.cursorRow > 0) {
     state.cursorRow--;
     state.cursorCol = state.lines[state.cursorRow].length;
@@ -27,7 +53,7 @@ function moveLeft(state) {
 }
 
 function moveRight(state) {
-  if (state.cursorCol < state.lines[state.cursorRow].length) state.cursorCol++;
+  if (state.cursorCol < state.lines[state.cursorRow].length) state.cursorCol = nextColumn(state.lines[state.cursorRow], state.cursorCol);
   else if (state.cursorRow < state.lines.length - 1) {
     state.cursorRow++;
     state.cursorCol = 0;
@@ -74,8 +100,9 @@ function insertNewline(state) {
 function backspace(state) {
   if (state.cursorCol > 0) {
     const line = state.lines[state.cursorRow];
-    state.lines[state.cursorRow] = line.slice(0, state.cursorCol - 1) + line.slice(state.cursorCol);
-    state.cursorCol--;
+    const previousCol = previousColumn(line, state.cursorCol);
+    state.lines[state.cursorRow] = line.slice(0, previousCol) + line.slice(state.cursorCol);
+    state.cursorCol = previousCol;
   } else if (state.cursorRow > 0) {
     const prev = state.lines[state.cursorRow - 1];
     const current = state.lines[state.cursorRow];
@@ -91,7 +118,7 @@ function backspace(state) {
 function deleteForward(state) {
   const line = state.lines[state.cursorRow];
   if (state.cursorCol < line.length) {
-    state.lines[state.cursorRow] = line.slice(0, state.cursorCol) + line.slice(state.cursorCol + 1);
+    state.lines[state.cursorRow] = line.slice(0, state.cursorCol) + line.slice(nextColumn(line, state.cursorCol));
   } else if (state.cursorRow < state.lines.length - 1) {
     state.lines[state.cursorRow] = line + state.lines[state.cursorRow + 1];
     state.lines.splice(state.cursorRow + 1, 1);
@@ -184,4 +211,6 @@ module.exports = {
   previousSearchIndex,
   replaceCurrent,
   replaceAll,
+  nextColumn,
+  previousColumn,
 };

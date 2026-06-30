@@ -35,11 +35,13 @@ Files that do not exist are opened as empty buffers and can be saved later.
 npm test
 ```
 
-Automated tests cover file helper behavior, pure editor state helpers, and the Tree-sitter syntax service, including AST parsing, syntax highlighting, tree search, and syntax cache behavior. Interactive terminal behavior is covered by the manual QA checklist in `docs/manual-qa.md`.
+Automated tests cover file helper behavior, pure editor state helpers, Unicode display-width helpers, keybinding metadata, and the Tree-sitter syntax service, including AST parsing, syntax highlighting, tree search, and syntax cache behavior. Interactive terminal behavior is covered by the manual QA checklist in `docs/manual-qa.md`.
 
 LSP tests use fake transports and fake clients. They do not require a real JavaScript language server.
 
 ## Controls
+
+The controls below mirror the shared keybinding metadata in `keybindings.js`, which is also used by input handling and in-editor help text.
 
 | Key | Action |
 | --- | --- |
@@ -135,7 +137,5 @@ Hover requests first show `LSP hover: loading` in the LSP sidebar, then replace 
 
 ## Known limitations
 
-- Long lines are truncated visually; horizontal scrolling is not implemented yet.
 - Search and replace use case-sensitive plain substring matching.
-- Unicode display width may be inaccurate for emoji, CJK characters, and combining characters.
 - Interactive terminal behavior is currently verified manually rather than through automated tests.

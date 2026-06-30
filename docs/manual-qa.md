@@ -19,6 +19,7 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] `Enter` splits the current line.
 - [ ] `Tab` inserts two spaces.
 - [ ] Arrow keys move within and across lines.
+- [ ] Arrow keys move across emoji, CJK characters, and combining-mark text without landing inside surrogate pairs.
 - [ ] Cursor stays within valid line and column bounds.
 - [ ] `Backspace` deletes within a line.
 - [ ] `Backspace` at the start of a line joins with the previous line.
@@ -108,5 +109,14 @@ Use this checklist after changes that affect terminal input, rendering, file ope
 - [ ] Active line marker follows the cursor.
 - [ ] Terminal resize redraws the editor correctly.
 - [ ] A small terminal window remains usable.
-- [ ] Long lines are truncated without breaking layout.
+- [ ] Long lines scroll horizontally as the cursor moves past the right edge.
+- [ ] Moving back toward the start of a long line scrolls horizontally left and keeps the cursor visible.
+- [ ] Long highlighted search/tree/syntax spans remain aligned while horizontally scrolled.
+- [ ] Emoji, CJK characters, and combining-mark text keep cursor placement and sidebar/status alignment usable.
 - [ ] `NO_COLOR=1 npm start` disables color styling.
+
+## Keybinding help consistency
+
+- [ ] The normal-mode help row matches the Controls table in `README.md`.
+- [ ] Search, replace, tree search, open, and save-as prompt help rows use the same key names as `README.md`.
+- [ ] Existing keybindings from `keybindings.js` still perform their documented actions.

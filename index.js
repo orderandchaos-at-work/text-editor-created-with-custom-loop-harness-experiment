@@ -6,6 +6,8 @@ const documentModel = require('./documentModel');
 const { createLspManager, defaultLspConfigs } = require('./lspManager');
 const { severityLabel } = require('./lspDiagnostics');
 const syntaxService = require('./syntaxService');
+const display = require('./displayWidth');
+const keybindings = require('./keybindings');
 
 const initialFilePaths = process.argv.slice(2).map(file => path.resolve(process.cwd(), file));
 const document = documentModel.createDocument(initialFilePaths, loadExistingFile);
@@ -17,6 +19,7 @@ let lines = document.buffers[0].lines;
 let cursorRow = document.buffers[0].cursorRow;
 let cursorCol = document.buffers[0].cursorCol;
 let viewportRow = document.buffers[0].viewportRow;
+let viewportCol = document.buffers[0].viewportCol;
 let dirty = document.buffers[0].dirty;
 let version = document.buffers[0].version;
 let quitConfirm = false;
@@ -65,6 +68,7 @@ function syncActiveBuffer() {
   buffer.cursorRow = cursorRow;
   buffer.cursorCol = cursorCol;
   buffer.viewportRow = viewportRow;
+  buffer.viewportCol = viewportCol;
   buffer.dirty = dirty;
   buffer.version = version;
 }
@@ -76,6 +80,7 @@ function loadActiveBuffer() {
   cursorRow = buffer.cursorRow;
   cursorCol = buffer.cursorCol;
   viewportRow = buffer.viewportRow;
+  viewportCol = buffer.viewportCol;
   dirty = buffer.dirty;
   version = buffer.version;
   searchQuery = '';
@@ -134,14 +139,30 @@ function clampCursor() {
   applyEditorState(editorState.clampCursor(currentEditorState()));
 }
 
+function editorMetrics(rows = process.stdout.rows || 24, cols = process.stdout.columns || 80) {
+  const sidebarWidth = sidebarWidthForCols(cols);
+  const leftCols = sidebarWidth ? cols - sidebarWidth - 1 : cols;
+  const visibleLines = Math.max(1, rows - 6);
+  const gutterWidth = String(Math.max(lines.length, viewportRow + visibleLines)).length;
+  const gutterLength = gutterWidth + 5;
+  const textWidth = Math.max(1, leftCols - gutterLength);
+  return { sidebarWidth, leftCols, visibleLines, gutterWidth, gutterLength, textWidth };
+}
+
 function updateViewport() {
   const rows = process.stdout.rows || 24;
+  const cols = process.stdout.columns || 80;
   const visibleLines = Math.max(1, rows - 6);
   if (cursorRow < viewportRow) viewportRow = cursorRow;
   if (cursorRow >= viewportRow + visibleLines) viewportRow = cursorRow - visibleLines + 1;
   if (viewportRow < 0) viewportRow = 0;
   const maxViewportRow = Math.max(0, lines.length - visibleLines);
   if (viewportRow > maxViewportRow) viewportRow = maxViewportRow;
+  const { textWidth } = editorMetrics(rows, cols);
+  const cursorColumn = display.textWidth(lines[cursorRow].slice(0, cursorCol));
+  if (cursorColumn < viewportCol) viewportCol = cursorColumn;
+  if (cursorColumn >= viewportCol + textWidth) viewportCol = cursorColumn - textWidth + 1;
+  if (viewportCol < 0) viewportCol = 0;
 }
 
 function moveLeft() {
@@ -263,7 +284,11 @@ function treeSearchPrevious() {
 }
 
 function isHoverKey(key) {
-  return key.name === 'f1' || (key.ctrl && key.name === 'space') || key.sequence === '\u0000';
+  return keybindings.matches('hover', key);
+}
+
+function isTextKey(key) {
+  return key.sequence && !key.ctrl && !key.meta && (key.sequence.length === 1 || !key.name);
 }
 
 async function showHover() {
@@ -352,18 +377,15 @@ function bufferName(buffer) {
 }
 
 function truncate(text, width) {
-  if (text.length <= width) return text;
-  return text.slice(0, Math.max(0, width - 1)) + '…';
+  return display.truncate(text, width);
 }
 
 function stripAnsi(text) {
-  return text.replace(/\u001b\[[0-9;]*m/g, '');
+  return display.stripAnsi(text);
 }
 
 function padRendered(text, width) {
-  const plainLength = stripAnsi(text).length;
-  if (plainLength >= width) return text;
-  return text + ' '.repeat(width - plainLength);
+  return display.padRendered(text, width);
 }
 
 function wrapText(text, width) {
@@ -456,20 +478,21 @@ function lineDecorations(row, highlights) {
   });
 }
 
-function renderDecoratedLine(line, row, width, highlights) {
-  const visible = truncate(line, width);
+function renderDecoratedLine(line, row, width, highlights, startColumn = 0) {
+  const visibleSlice = display.sliceByColumns(line, startColumn, width);
+  const visible = visibleSlice.text;
   const decorations = lineDecorations(row, highlights);
   let output = '';
-  let offset = 0;
+  let offset = visibleSlice.start;
   for (const span of decorations) {
-    const start = Math.max(0, Math.min(visible.length, span.col));
-    const end = Math.max(start, Math.min(visible.length, span.endCol));
+    const start = Math.max(visibleSlice.start, Math.min(visibleSlice.end, span.col));
+    const end = Math.max(start, Math.min(visibleSlice.end, span.endCol));
     if (start < offset || start === end) continue;
-    output += visible.slice(offset, start);
-    output += styleCapture(span.capture, visible.slice(start, end));
+    output += display.displayText(line.slice(offset, start));
+    output += styleCapture(span.capture, display.displayText(line.slice(start, end)));
     offset = end;
   }
-  return output + visible.slice(offset);
+  return output + display.displayText(line.slice(offset, visibleSlice.end));
 }
 
 function separator(cols) {
@@ -571,12 +594,14 @@ function renderSidebarLines(height, width) {
 }
 
 function renderHelp() {
-  if (openMode) return `${style.bold('Enter')} ${style.dim('open')}  ${style.bold('Esc')} ${style.dim('cancel')}`;
-  if (saveAsMode) return `${style.bold('Enter')} ${style.dim('save')}  ${style.bold('Esc')} ${style.dim('cancel')}`;
-  if (replaceMode) return `${style.bold('Enter')} ${style.dim('accept')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+R')} ${style.dim('replace all')}  ${style.bold('Ctrl+F')} ${style.dim('search')}`;
-  if (searchMode) return `${style.bold('Enter')} ${style.dim('search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Ctrl+F')} ${style.dim('search')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
-  if (treeSearchMode) return `${style.bold('Enter')} ${style.dim('tree search')}  ${style.bold('Esc')} ${style.dim('cancel')}  ${style.bold('Presets')} ${style.dim('functions/calls/classes')}  ${style.bold('Ctrl+G')} ${style.dim('next')}  ${style.bold('Ctrl+Shift+G')} ${style.dim('prev')}`;
-  return `${style.bold('Ctrl+S')} ${style.dim('Save')}  ${style.bold('Ctrl+O')} ${style.dim('Open')}  ${style.bold('Ctrl+N/P')} ${style.dim('Next/Prev')}  ${style.bold('Ctrl+Q')} ${style.dim('Quit')}  ${style.bold('Ctrl+F')} ${style.dim('Search')}  ${style.bold('Ctrl+R')} ${style.dim('Replace')}  ${style.bold('Ctrl+T')} ${style.dim('Tree')}  ${style.bold('Ctrl+Space/F1')} ${style.dim('Hover')}`;
+  const item = (key, action) => `${style.bold(key)} ${style.dim(action)}`;
+  const binding = id => item(keybindings.helpLabel(id), keybindings.helpAction(id));
+  if (openMode) return `${item('Enter', 'open')}  ${binding('cancel')}`;
+  if (saveAsMode) return `${item('Enter', 'save')}  ${binding('cancel')}`;
+  if (replaceMode) return `${item('Enter', 'accept')}  ${binding('cancel')}  ${item(keybindings.helpLabel('replace'), 'replace all')}  ${binding('search')}`;
+  if (searchMode) return `${item('Enter', 'search')}  ${binding('cancel')}  ${binding('search')}  ${binding('nextMatch')}  ${binding('previousMatch')}`;
+  if (treeSearchMode) return `${item('Enter', 'tree search')}  ${binding('cancel')}  ${item('Presets', 'functions/calls/classes')}  ${binding('nextMatch')}  ${binding('previousMatch')}`;
+  return `${binding('save')}  ${binding('open')}  ${item('Ctrl+N/P', 'Next/Prev')}  ${binding('quit')}  ${binding('search')}  ${binding('replace')}  ${binding('tree')}  ${item('Ctrl+Space/F1', keybindings.helpAction('hover'))}`;
 }
 
 function render() {
@@ -584,18 +609,13 @@ function render() {
   syncActiveBuffer();
   const rows = process.stdout.rows || 24;
   const cols = process.stdout.columns || 80;
-  const sidebarWidth = sidebarWidthForCols(cols);
-  const leftCols = sidebarWidth ? cols - sidebarWidth - 1 : cols;
-  const visibleLines = Math.max(1, rows - 6);
+  const { sidebarWidth, leftCols, visibleLines, gutterWidth, gutterLength, textWidth } = editorMetrics(rows, cols);
   const visibleText = Array.from({ length: visibleLines }, (_, index) => lines[viewportRow + index] || '');
   const sidebarLines = renderSidebarLines(visibleLines, sidebarWidth);
   const status = filePath ? path.relative(process.cwd(), filePath) : '[No file]';
   const totalLines = lines.length;
   const syntax = syntaxService.getBufferState(activeBuffer().id);
   const highlights = syntax ? syntax.highlights : [];
-  const gutterWidth = String(Math.max(totalLines, viewportRow + visibleLines)).length;
-  const gutterLength = gutterWidth + 5;
-  const textWidth = Math.max(1, leftCols - gutterLength);
   const output = '\u001b[?25l\u001b[2J\u001b[H' + [
     renderHeader(cols, status),
     renderTabs(cols),
@@ -606,7 +626,7 @@ function render() {
       const caret = active ? style.cyan('>') : ' ';
       const lineNumber = String(absoluteRow + 1).padStart(gutterWidth);
       const gutter = `${caret} ${style.dim(lineNumber)} ${style.dim('│')} `;
-      const editorLine = padRendered(`${gutter}${renderDecoratedLine(line, absoluteRow, textWidth, highlights)}`, leftCols);
+      const editorLine = padRendered(`${gutter}${renderDecoratedLine(line, absoluteRow, textWidth, highlights, viewportCol)}`, leftCols);
       return sidebarWidth ? `${editorLine}${style.dim('│')}${sidebarLines[index]}` : editorLine;
     }),
     separator(cols),
@@ -616,7 +636,8 @@ function render() {
   process.stdout.write(output);
   const promptRow = 5 + visibleText.length;
   let targetRow = 4 + (cursorRow - viewportRow);
-  let targetCol = gutterLength + Math.min(cursorCol, textWidth - 1) + 1;
+  const cursorDisplayColumn = Math.max(0, display.textWidth(lines[cursorRow].slice(0, cursorCol)) - viewportCol);
+  let targetCol = gutterLength + Math.min(cursorDisplayColumn, textWidth - 1) + 1;
   if (openMode) {
     targetRow = promptRow;
     targetCol = 'Open: '.length + openPath.length + 1;
@@ -701,7 +722,7 @@ process.stdout.write('\u001b[?1049h\u001b[?25l');
 
 process.stdin.on('keypress', (_, key) => {
   if (!key) return;
-  if (key.ctrl && key.name === 'c') {
+  if (keybindings.matches('forceQuit', key)) {
     quit();
     return;
   }
@@ -725,7 +746,7 @@ process.stdin.on('keypress', (_, key) => {
       render();
       return;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
+    if (isTextKey(key)) {
       openPath += key.sequence;
       render();
       return;
@@ -754,7 +775,7 @@ process.stdin.on('keypress', (_, key) => {
       render();
       return;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
+    if (isTextKey(key)) {
       saveAsPath += key.sequence;
       render();
       return;
@@ -793,7 +814,7 @@ process.stdin.on('keypress', (_, key) => {
       render();
       return;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
+    if (isTextKey(key)) {
       if (replaceStage === 'query') replaceQuery += key.sequence;
       else replaceText += key.sequence;
       render();
@@ -824,7 +845,7 @@ process.stdin.on('keypress', (_, key) => {
       render();
       return;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
+    if (isTextKey(key)) {
       searchQuery += key.sequence;
       updateSearchMatches();
       render();
@@ -855,33 +876,33 @@ process.stdin.on('keypress', (_, key) => {
       render();
       return;
     }
-    if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) {
+    if (isTextKey(key)) {
       treeQuery += key.sequence;
       render();
       return;
     }
     return;
   }
-  if (key.ctrl && key.name === 'q') {
+  if (keybindings.matches('quit', key)) {
     requestQuit();
     return;
   }
-  if (key.ctrl && key.name === 'o') {
+  if (keybindings.matches('open', key)) {
     promptOpen();
     render();
     return;
   }
-  if (key.ctrl && key.name === 'n') {
+  if (keybindings.matches('nextBuffer', key)) {
     switchBuffer(1);
     render();
     return;
   }
-  if (key.ctrl && key.name === 'p') {
+  if (keybindings.matches('previousBuffer', key)) {
     switchBuffer(-1);
     render();
     return;
   }
-  if (key.ctrl && key.name === 's') {
+  if (keybindings.matches('save', key)) {
     if (!filePath) {
       promptSaveAs();
       render();
@@ -896,17 +917,17 @@ process.stdin.on('keypress', (_, key) => {
     render();
     return;
   }
-  if (key.ctrl && key.name === 'f') {
+  if (keybindings.matches('search', key)) {
     promptSearch();
     render();
     return;
   }
-  if (key.ctrl && key.name === 'r') {
+  if (keybindings.matches('replace', key)) {
     promptReplace();
     render();
     return;
   }
-  if (key.ctrl && key.name === 't') {
+  if (keybindings.matches('tree', key)) {
     promptTreeSearch();
     render();
     return;
@@ -915,11 +936,11 @@ process.stdin.on('keypress', (_, key) => {
     void showHover();
     return;
   }
-  if (key.ctrl && key.name === 'g') {
+  if (keybindings.matches('nextMatch', key) || keybindings.matches('previousMatch', key)) {
     if (treeMatches.length) {
-      if (key.shift) treeSearchPrevious();
+      if (keybindings.matches('previousMatch', key)) treeSearchPrevious();
       else treeSearchNext();
-    } else if (key.shift) findPrevious();
+    } else if (keybindings.matches('previousMatch', key)) findPrevious();
     else findNext();
     render();
     return;
@@ -932,7 +953,7 @@ process.stdin.on('keypress', (_, key) => {
   else if (key.name === 'delete') deleteForward();
   else if (key.name === 'return') insertNewline();
   else if (key.name === 'tab') insertText('  ');
-  else if (key.sequence && key.sequence.length === 1 && !key.ctrl && !key.meta) insertText(key.sequence);
+  else if (isTextKey(key)) insertText(key.sequence);
   quitConfirm = false;
   clampCursor();
   syncActiveBuffer();
