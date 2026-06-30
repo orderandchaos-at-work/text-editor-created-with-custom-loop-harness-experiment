@@ -385,7 +385,13 @@ function emptySyntaxState(languageName, bufferId, version) {
   };
 }
 
-function updateBuffer(bufferId, lines, filePath, version) {
+function incrementalParse(state, lines, languageName, editEvent) {
+  if (!state || state.languageName !== languageName || !state.available || !state.parser || !state.tree || !editEvent || !editEvent.treeEdit) return null;
+  state.tree.edit(editEvent.treeEdit);
+  return { parser: state.parser, tree: state.parser.parse(linesToText(lines), state.tree), language: state.language };
+}
+
+function updateBuffer(bufferId, lines, filePath, version, editEvent = null) {
   const languageName = detectLanguage(filePath);
   if (!languageName) {
     const state = emptySyntaxState(null, bufferId, version);
@@ -393,7 +399,12 @@ function updateBuffer(bufferId, lines, filePath, version) {
     return state;
   }
   try {
+<<<<<<< HEAD
+    const previousState = bufferStates.get(bufferId);
+    const result = incrementalParse(previousState, lines, languageName, editEvent) || parseWithLanguage(lines, languageName);
+=======
     const result = parseWithLanguage(lines, languageName);
+>>>>>>> f04bcd22619f7c217b61fba9ab760918343c7555
     const state = {
       bufferId,
       supported: true,
